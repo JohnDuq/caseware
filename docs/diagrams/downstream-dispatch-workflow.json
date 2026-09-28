@@ -1,0 +1,186 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Despacho downstream, capacidad y reintentos",
+    "output": "docs/diagrams/downstream-dispatch-workflow.html",
+    "viewBox": [1240, 786],
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/JohnDuq/caseware.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "ee4b555eb17097fe24c7e196230f3e189ea7a8b4"
+    }
+  },
+  "lanes": [
+    { "id": "trigger", "label": "Planificador" },
+    { "id": "application", "label": "Servicio de aplicación" },
+    { "id": "persistence", "label": "Persistencia" },
+    { "id": "external", "label": "Servicio downstream" },
+    { "id": "failure", "label": "Recuperación", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "acquire", "label": "Adquirir trabajo", "fromCol": 0, "toCol": 2 },
+    { "id": "execute", "label": "Ejecutar", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "settle", "label": "Confirmar o reintentar", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["tick", "capacity", "claim", "submit", "call", "succeeded"],
+  "nodes": [
+    {
+      "id": "tick",
+      "lane": "trigger",
+      "col": 0,
+      "type": "messagebus",
+      "label": "Tick programado",
+      "sublabel": "dispatchAvailable",
+      "width": 140,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/in/scheduler/DownstreamTaskScheduler.java", "line": 16, "end_line": 20 }
+      ]
+    },
+    {
+      "id": "capacity",
+      "lane": "application",
+      "col": 1,
+      "type": "security",
+      "label": "Cupo disponible",
+      "sublabel": "Semaphore.tryAcquire",
+      "tag": "límite local",
+      "width": 144,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 32, "end_line": 43 }
+      ]
+    },
+    {
+      "id": "claim",
+      "lane": "persistence",
+      "col": 2,
+      "type": "database",
+      "label": "Reclamar tarea",
+      "sublabel": "lease transaccional",
+      "width": 140,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 47, "end_line": 55 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 58, "end_line": 67 }
+      ]
+    },
+    {
+      "id": "submit",
+      "lane": "application",
+      "col": 3,
+      "type": "backend",
+      "label": "Enviar al executor",
+      "sublabel": "procesamiento acotado",
+      "width": 146,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 35, "end_line": 43 }
+      ]
+    },
+    {
+      "id": "call",
+      "lane": "external",
+      "col": 4,
+      "type": "external",
+      "label": "Evaluar actualización",
+      "sublabel": "idempotency key estable",
+      "width": 152,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 58, "end_line": 64 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/downstream/LoggingEngagementUpdateAdapter.java", "line": 13, "end_line": 16 }
+      ]
+    },
+    {
+      "id": "succeeded",
+      "lane": "persistence",
+      "col": 5,
+      "type": "database",
+      "label": "SUCCEEDED",
+      "sublabel": "lease confirmado",
+      "width": 138,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 70, "end_line": 74 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/repository/FanOutTaskJpaRepository.java", "line": 47, "end_line": 65 }
+      ]
+    },
+    {
+      "id": "no_work",
+      "lane": "failure",
+      "col": 3,
+      "type": "backend",
+      "label": "Sin tarea",
+      "sublabel": "libera cupo y termina",
+      "width": 140,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 36, "end_line": 40 }
+      ]
+    },
+    {
+      "id": "failed_call",
+      "lane": "failure",
+      "col": 4,
+      "type": "security",
+      "label": "Fallo downstream",
+      "sublabel": "clasifica por intentos",
+      "width": 148,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 65, "end_line": 73 }
+      ]
+    },
+    {
+      "id": "retry",
+      "lane": "failure",
+      "col": 5,
+      "type": "messagebus",
+      "label": "RETRY",
+      "sublabel": "backoff exponencial",
+      "width": 132,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 67, "end_line": 81 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 77, "end_line": 85 }
+      ]
+    },
+    {
+      "id": "dead_letter",
+      "lane": "trigger",
+      "col": 5,
+      "type": "security",
+      "label": "DEAD_LETTER",
+      "sublabel": "máximo de intentos",
+      "width": 140,
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 65, "end_line": 72 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 77, "end_line": 85 }
+      ]
+    }
+  ],
+  "edges": [
+    { "id": "tick_capacity", "from": "tick", "to": "capacity", "label": "intenta cupo", "variant": "emphasis" },
+    { "id": "capacity_claim", "from": "capacity", "to": "claim", "label": "cupo adquirido" },
+    { "id": "claim_submit", "from": "claim", "to": "submit", "label": "lease" },
+    { "id": "submit_call", "from": "submit", "to": "call", "label": "async", "role": "async", "variant": "dashed" },
+    { "id": "call_success", "from": "call", "to": "succeeded", "label": "éxito", "variant": "emphasis" },
+    { "id": "claim_empty", "from": "claim", "to": "no_work", "label": "vacío", "role": "branch", "variant": "dashed" },
+    { "id": "call_failure", "from": "call", "to": "failed_call", "label": "excepción", "role": "error", "variant": "security" },
+    { "id": "failure_retry", "from": "failed_call", "to": "retry", "label": "quedan intentos", "role": "branch", "variant": "dashed" },
+    { "id": "failure_dead", "from": "failed_call", "to": "dead_letter", "label": "límite alcanzado", "role": "error", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Protección de capacidad",
+      "items": [
+        "El semáforo limita llamadas simultáneas antes de reclamar trabajo",
+        "El cupo siempre se libera en finally"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Recuperación",
+      "items": [
+        "Los fallos temporales esperan con backoff exponencial",
+        "El último intento termina en DEAD_LETTER"
+      ]
+    }
+  ]
+}

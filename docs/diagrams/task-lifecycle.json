@@ -1,0 +1,109 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Ciclo de vida de una tarea de fan-out",
+    "output": "docs/diagrams/task-lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/JohnDuq/caseware.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "ee4b555eb17097fe24c7e196230f3e189ea7a8b4"
+    }
+  },
+  "lanes": [
+    { "id": "main", "label": "Procesamiento" },
+    { "id": "recovery", "label": "Recuperación" },
+    { "id": "terminal", "label": "Estados terminales" }
+  ],
+  "states": [
+    {
+      "id": "pending",
+      "type": "start",
+      "label": "PENDING",
+      "sublabel": "tarea durable creada",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 42, "end_line": 54 }
+      ]
+    },
+    {
+      "id": "processing",
+      "type": "active",
+      "label": "PROCESSING",
+      "sublabel": "lease + attemptCount",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/entity/FanOutTaskJpaEntity.java", "line": 78, "end_line": 90 }
+      ]
+    },
+    {
+      "id": "retry",
+      "type": "waiting",
+      "label": "RETRY",
+      "sublabel": "nextAttemptAt + error",
+      "lane": "recovery",
+      "col": 2,
+      "tag": "recuperable",
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 77, "end_line": 85 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/repository/FanOutTaskJpaRepository.java", "line": 67, "end_line": 88 }
+      ]
+    },
+    {
+      "id": "succeeded",
+      "type": "success",
+      "label": "SUCCEEDED",
+      "sublabel": "actualización confirmada",
+      "lane": "terminal",
+      "col": 2,
+      "tag": "terminal",
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/repository/FanOutTaskJpaRepository.java", "line": 47, "end_line": 65 }
+      ]
+    },
+    {
+      "id": "dead_letter",
+      "type": "failure",
+      "label": "DEAD_LETTER",
+      "sublabel": "intentos agotados",
+      "lane": "terminal",
+      "col": 3,
+      "tag": "terminal",
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 65, "end_line": 72 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 77, "end_line": 85 }
+      ]
+    }
+  ],
+  "transitions": [
+    { "id": "claim", "from": "pending", "to": "processing", "label": "claim + lease", "variant": "emphasis" },
+    { "id": "success", "from": "processing", "to": "succeeded", "label": "downstream OK", "variant": "emphasis" },
+    { "id": "temporary", "from": "processing", "to": "retry", "label": "fallo temporal", "variant": "dashed" },
+    { "id": "retry_due", "from": "retry", "to": "processing", "label": "backoff vencido", "variant": "dashed" },
+    { "id": "terminal_failure", "from": "processing", "to": "dead_letter", "label": "máximo de intentos", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Leases",
+      "items": [
+        "Solo el poseedor del lease puede confirmar éxito o fallo",
+        "Una tarea PROCESSING con lease vencido vuelve a ser reclamable"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Idempotencia",
+      "items": [
+        "Cada reintento conserva publicationId:fileId",
+        "La restricción única evita duplicar tareas por publicación y archivo"
+      ]
+    }
+  ]
+}

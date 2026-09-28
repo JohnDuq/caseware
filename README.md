@@ -17,6 +17,8 @@ The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Da
 
 See [docs/architecture.md](docs/architecture.md) for the system design, scale calculations, production evolution, data residency, and human-readable summary strategy.
 
+Explore the implementation visually through the [interactive architecture and workflow diagrams](docs/diagrams/README.md).
+
 Import [docs/caseware-api.postman_collection.json](docs/caseware-api.postman_collection.json) into Postman to run the complete API example flow against `http://localhost:8080`.
 
 ## Run the project
