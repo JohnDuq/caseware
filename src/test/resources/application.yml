@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:caseware-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+
+worker:
+  scheduling-enabled: false
+  fan-out-page-size: 2
+  max-fan-out-pages-per-run: 100
+  max-concurrency: 2
+  poll-delay: 10ms
+  lease-duration: 5s
+  max-attempts: 3
+  retry-initial-delay: 1ms
