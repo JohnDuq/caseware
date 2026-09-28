@@ -15,11 +15,19 @@ The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Da
 - Every downstream retry carries the same `<publicationId>:<fileId>` idempotency key.
 - The catalog contains metadata only; no confidential working-paper content is copied into this service.
 
-See [docs/architecture.md](docs/architecture.md) for the system design, scale calculations, production evolution, data residency, and human-readable summary strategy.
+## Project documents
 
-Explore the implementation visually through the [interactive architecture and workflow diagrams](docs/diagrams/README.md).
+- [Architecture solution (PDF)](docs/JHONNATAN_DUQUE_RAMOS_Architecture_Solution.pdf)
+- [Architecture design (Markdown)](docs/architecture.md)
+- [Original take-home test](docs/Staff_Java_Developer_-_Take-Home_Test.pdf)
+- [Postman API collection](docs/caseware-api.postman_collection.json)
+- [Interactive diagram index](docs/diagrams/README.md)
+- [Ports and adapters architecture](docs/diagrams/hexagonal-architecture.html)
+- [Publication and fan-out sequence](docs/diagrams/publication-fanout-sequence.html)
+- [Downstream dispatch, capacity, and retries](docs/diagrams/downstream-dispatch-workflow.html)
+- [Fan-out task lifecycle](docs/diagrams/task-lifecycle.html)
 
-Import [docs/caseware-api.postman_collection.json](docs/caseware-api.postman_collection.json) into Postman to run the complete API example flow against `http://localhost:8080`.
+The architecture documents cover scale calculations, production evolution, data residency, and the human-readable summary strategy. Import the Postman collection to run the complete API example flow against `http://localhost:8080`.
 
 ## Run the project
 
