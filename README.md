@@ -30,6 +30,14 @@ The API starts on `http://localhost:8080`. H2 persists under `./data`, and its d
 
 Health and metrics are exposed through `/actuator/health` and `/actuator/metrics`. Worker settings are under `worker` in `src/main/resources/application.yml`.
 
+On startup, the application loads an idempotent sample dataset into H2: five Engagement Files and the `sample-publication-audit-ca-v7` publication. Three files are eligible for the update, one is already on `v7`, and one belongs to another market. Disable this behavior with `application.sample-data.enabled=false`.
+
+Inspect the sample publication after startup:
+
+```sh
+curl http://localhost:8080/api/v1/template-publications/sample-publication-audit-ca-v7
+```
+
 ## Try the flow
 
 Create two lightweight Engagement File catalog entries:

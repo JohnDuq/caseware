@@ -8,6 +8,10 @@ spring:
       ddl-auto: create-drop
     open-in-view: false
 
+application:
+  sample-data:
+    enabled: false
+
 worker:
   scheduling-enabled: false
   fan-out-page-size: 2

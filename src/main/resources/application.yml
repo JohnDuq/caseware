@@ -24,6 +24,10 @@ management:
       probes:
         enabled: true
 
+application:
+  sample-data:
+    enabled: true
+
 worker:
   scheduling-enabled: true
   fan-out-page-size: 500
