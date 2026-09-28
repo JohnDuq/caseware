@@ -2,7 +2,9 @@ package com.caseware.interview.adapter.in.web;
 
 import java.net.URI;
 
-import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.adapter.in.web.data.request.TemplatePublicationRequest;
+import com.caseware.interview.adapter.in.web.data.response.PublicationStatusResponse;
+import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
 import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

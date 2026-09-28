@@ -3,11 +3,12 @@ package com.caseware.interview.adapter.in.bootstrap;
 import java.time.Instant;
 import java.util.List;
 
-import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
-import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
 import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
 import lombok.RequiredArgsConstructor;
+import org.jspecify.annotations.NonNull;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -28,7 +29,7 @@ public class SampleDataInitializer implements ApplicationRunner {
     private final TemplatePublicationUseCase publications;
 
     @Override
-    public void run(ApplicationArguments arguments) {
+    public void run(@NonNull ApplicationArguments arguments) {
         sampleFiles().forEach(engagementFiles::upsert);
         publications.register(new TemplatePublicationCommand(
                 "sample-publication-audit-ca-v7",

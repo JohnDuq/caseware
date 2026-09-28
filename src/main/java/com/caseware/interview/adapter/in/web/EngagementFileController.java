@@ -1,6 +1,7 @@
 package com.caseware.interview.adapter.in.web;
 
-import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.adapter.in.web.data.request.EngagementFileRequest;
+import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;

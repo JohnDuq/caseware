@@ -16,12 +16,12 @@ import com.caseware.interview.adapter.out.persistence.repository.EngagementFileJ
 import com.caseware.interview.adapter.out.persistence.repository.FanOutTaskJpaRepository;
 import com.caseware.interview.adapter.out.persistence.repository.PublicationJpaRepository;
 import com.caseware.interview.application.exception.PublicationConflictException;
-import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
 import com.caseware.interview.application.port.in.FanOutUseCase;
 import com.caseware.interview.application.port.in.PublicationRegistration;
 import com.caseware.interview.application.port.in.TaskDispatchUseCase;
-import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
 import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
 import com.caseware.interview.application.port.out.EngagementUpdatePort;
 import com.caseware.interview.application.port.out.FanOutTaskStorePort;

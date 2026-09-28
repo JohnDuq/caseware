@@ -2,7 +2,7 @@ package com.caseware.interview.application.service;
 
 import java.time.Clock;
 
-import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
 import com.caseware.interview.application.port.out.EngagementFileCatalogPort;
 import com.caseware.interview.domain.EngagementFile;

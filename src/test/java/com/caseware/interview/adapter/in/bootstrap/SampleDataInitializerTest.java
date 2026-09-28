@@ -6,9 +6,9 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import java.time.Instant;
 
-import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
-import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
 import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.ApplicationArguments;

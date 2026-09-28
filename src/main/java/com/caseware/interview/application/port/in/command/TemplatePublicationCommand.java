@@ -1,4 +1,4 @@
-package com.caseware.interview.application.port.in;
+package com.caseware.interview.application.port.in.command;
 
 import java.time.Instant;
 

@@ -6,7 +6,7 @@ import com.caseware.interview.application.exception.PublicationConflictException
 import com.caseware.interview.application.exception.PublicationNotFoundException;
 import com.caseware.interview.application.port.in.PublicationRegistration;
 import com.caseware.interview.application.port.in.PublicationStatusView;
-import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
 import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
 import com.caseware.interview.application.port.out.FanOutTaskStorePort;
 import com.caseware.interview.application.port.out.PublicationStorePort;

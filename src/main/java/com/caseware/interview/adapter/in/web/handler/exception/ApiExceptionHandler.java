@@ -1,4 +1,4 @@
-package com.caseware.interview.adapter.in.web;
+package com.caseware.interview.adapter.in.web.handler.exception;
 
 import java.time.Instant;
 import java.util.Map;
@@ -14,12 +14,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ApiExceptionHandler {
 
     @ExceptionHandler(PublicationConflictException.class)
-    ResponseEntity<Map<String, Object>> conflict(PublicationConflictException exception) {
+    public ResponseEntity<Map<String, Object>> conflict(PublicationConflictException exception) {
         return error(HttpStatus.CONFLICT, exception.getMessage());
     }
 
     @ExceptionHandler(PublicationNotFoundException.class)
-    ResponseEntity<Map<String, Object>> notFound(PublicationNotFoundException exception) {
+    public ResponseEntity<Map<String, Object>> notFound(PublicationNotFoundException exception) {
         return error(HttpStatus.NOT_FOUND, exception.getMessage());
     }
 
