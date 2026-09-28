@@ -29,6 +29,26 @@ The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Da
 
 The architecture documents cover scale calculations, production evolution, data residency, and the human-readable summary strategy. Import the Postman collection to run the complete API example flow against `http://localhost:8080`.
 
+## Architecture diagrams
+
+Each PNG below links to its interactive HTML version, which supports light and dark themes and additional export formats.
+
+### Ports and adapters architecture
+
+[![Ports and adapters architecture](docs/diagrams/hexagonal-architecture.png)](docs/diagrams/hexagonal-architecture.html)
+
+### Publication and fan-out sequence
+
+[![Publication and fan-out sequence](docs/diagrams/publication-fanout-sequence.png)](docs/diagrams/publication-fanout-sequence.html)
+
+### Downstream dispatch, capacity, and retries
+
+[![Downstream dispatch, capacity, and retries](docs/diagrams/downstream-dispatch-workflow.png)](docs/diagrams/downstream-dispatch-workflow.html)
+
+### Fan-out task lifecycle
+
+[![Fan-out task lifecycle](docs/diagrams/task-lifecycle.png)](docs/diagrams/task-lifecycle.html)
+
 ## Run the project
 
 Requirements: Java 21 or newer. The Maven wrapper downloads Maven 3.9.12 on first use.
