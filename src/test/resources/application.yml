@@ -3,9 +3,10 @@ spring:
     url: jdbc:h2:mem:caseware-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
     password:
-  sql:
-    init:
-      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
 
 worker:
   scheduling-enabled: false

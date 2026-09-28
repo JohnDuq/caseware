@@ -12,6 +12,7 @@ import com.caseware.interview.client.EngagementUpdateClient;
 import com.caseware.interview.config.WorkerProperties;
 import com.caseware.interview.domain.TaskLease;
 import com.caseware.interview.repository.FanOutTaskRepository;
+import com.caseware.interview.repository.entity.FanOutTaskEntity;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -72,15 +73,14 @@ public class DownstreamTaskDispatcher {
     private Optional<TaskLease> claimNextTask() {
         Optional<TaskLease> result = transaction.execute(ignored -> {
             Instant now = clock.instant();
-            Optional<Long> taskId = tasks.findClaimableTaskId(now);
-            if (taskId.isEmpty()) {
+            Optional<FanOutTaskEntity> task = tasks.findNextClaimable(now);
+            if (task.isEmpty()) {
                 return Optional.empty();
             }
-            return tasks.claim(
-                    taskId.get(),
+            return Optional.of(task.get().claim(
                     UUID.randomUUID().toString(),
-                    now,
-                    now.plus(properties.leaseDuration()));
+                    now.plus(properties.leaseDuration()),
+                    now));
         });
         return result == null ? Optional.empty() : result;
     }

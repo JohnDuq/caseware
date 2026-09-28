@@ -5,8 +5,8 @@ import java.time.Clock;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 
-import com.caseware.interview.domain.EngagementFile;
 import com.caseware.interview.repository.EngagementFileRepository;
+import com.caseware.interview.repository.entity.EngagementFileEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,7 +32,7 @@ public class EngagementFileController {
     public ResponseEntity<Void> upsert(
             @PathVariable @Size(max = 100) String fileId,
             @Valid @RequestBody EngagementFileRequest request) {
-        files.save(new EngagementFile(
+        files.save(new EngagementFileEntity(
                 fileId,
                 request.firmId(),
                 request.templateId(),

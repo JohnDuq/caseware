@@ -9,9 +9,10 @@ spring:
     console:
       enabled: true
       path: /h2-console
-  sql:
-    init:
-      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
 
 management:
   endpoints:

@@ -11,6 +11,8 @@ import static org.mockito.ArgumentMatchers.any;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
@@ -19,13 +21,15 @@ import com.caseware.interview.client.LoggingEngagementUpdateClient;
 import com.caseware.interview.config.WorkerProperties;
 import com.caseware.interview.domain.PublicationStatus;
 import com.caseware.interview.domain.TaskCounts;
-import com.caseware.interview.domain.TemplatePublication;
 import com.caseware.interview.repository.EngagementFileRepository;
 import com.caseware.interview.repository.FanOutTaskRepository;
 import com.caseware.interview.repository.PublicationRepository;
 import com.caseware.interview.repository.PublicationRepository.RegistrationResult;
+import com.caseware.interview.repository.entity.TemplatePublicationEntity;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -38,26 +42,33 @@ class ServiceUnitTest {
     void publicationServiceRegistersTheDomainEvent() {
         PublicationRepository repository = mock(PublicationRepository.class);
         FanOutTaskRepository tasks = mock(FanOutTaskRepository.class);
-        PublicationService service = new PublicationService(repository, tasks);
+        PublicationService service = new PublicationService(
+                repository, tasks, Clock.fixed(NOW, ZoneOffset.UTC));
         TemplatePublicationRequest request = new TemplatePublicationRequest(
                 "publication-1", "template-a", "v4", "CA", NOW);
-        when(repository.register(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(RegistrationResult.CREATED);
 
         assertThat(service.register(request)).isEqualTo(RegistrationResult.CREATED);
-        verify(repository).register(new TemplatePublication(
-                "publication-1", "template-a", "v4", "CA", NOW,
-                PublicationStatus.PENDING, null, 0));
+        ArgumentCaptor<TemplatePublicationEntity> captor =
+                ArgumentCaptor.forClass(TemplatePublicationEntity.class);
+        verify(repository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getPublicationId()).isEqualTo("publication-1");
+        assertThat(captor.getValue().getTemplateId()).isEqualTo("template-a");
+        assertThat(captor.getValue().getTargetVersion()).isEqualTo("v4");
+        assertThat(captor.getValue().getMarket()).isEqualTo("CA");
+        assertThat(captor.getValue().getPublishedAt()).isEqualTo(NOW);
+        assertThat(captor.getValue().getStatus()).isEqualTo(PublicationStatus.PENDING);
     }
 
     @Test
     void publicationServiceBuildsStatusAndRejectsUnknownIds() {
         PublicationRepository repository = mock(PublicationRepository.class);
         FanOutTaskRepository tasks = mock(FanOutTaskRepository.class);
-        PublicationService service = new PublicationService(repository, tasks);
-        TemplatePublication publication = new TemplatePublication(
-                "publication-1", "template-a", "v4", "CA", NOW,
-                PublicationStatus.FAN_OUT_COMPLETE, "file-2", 2);
+        PublicationService service = new PublicationService(
+                repository, tasks, Clock.fixed(NOW, ZoneOffset.UTC));
+        TemplatePublicationEntity publication = new TemplatePublicationEntity(
+                "publication-1", "template-a", "v4", "CA", NOW, NOW);
+        publication.claim("lease", NOW.plusSeconds(5), NOW);
+        publication.completePage("file-2", 2, true, NOW);
         TaskCounts counts = new TaskCounts(0, 0, 0, 2, 0);
         when(repository.findById("publication-1")).thenReturn(Optional.of(publication));
         when(tasks.countsForPublication("publication-1")).thenReturn(counts);
@@ -103,28 +114,24 @@ class ServiceUnitTest {
     }
 
     @Test
-    void fanOutStopsCleanlyWhenACompetingWorkerWinsTheLease() {
+    void fanOutCompletesAnEmptyJpaPage() {
         PublicationRepository publications = mock(PublicationRepository.class);
         EngagementFileRepository files = mock(EngagementFileRepository.class);
         FanOutTaskRepository tasks = mock(FanOutTaskRepository.class);
         TransactionTemplate transaction = immediateTransaction();
-        TemplatePublication publication = new TemplatePublication(
-                "publication-race", "template-a", "v4", "CA", NOW,
-                PublicationStatus.PENDING, null, 0);
-        when(publications.findClaimable(NOW)).thenReturn(Optional.of(publication));
-        when(publications.claim(
-                org.mockito.ArgumentMatchers.eq("publication-race"),
-                any(String.class),
-                org.mockito.ArgumentMatchers.eq(NOW),
-                org.mockito.ArgumentMatchers.eq(NOW.plusSeconds(5))))
-                .thenReturn(false);
+        TemplatePublicationEntity publication = new TemplatePublicationEntity(
+                "publication-empty", "template-a", "v4", "CA", NOW, NOW);
+        when(publications.findNextClaimable(NOW)).thenReturn(Optional.of(publication));
+        when(files.findAffectedFiles(
+                "template-a", "CA", "v4", "", PageRequest.of(0, 2)))
+                .thenReturn(List.of());
         TemplatePublishFanOutWorker worker = new TemplatePublishFanOutWorker(
                 publications, files, tasks, properties(true), Clock.fixed(NOW, java.time.ZoneOffset.UTC),
                 transaction, new SimpleMeterRegistry());
 
-        assertThat(worker.processOnePage()).isFalse();
-        verify(files, org.mockito.Mockito.never()).findAffectedFileIds(
-                any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
+        assertThat(worker.processOnePage()).isTrue();
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.FAN_OUT_COMPLETE);
+        verify(tasks).saveAll(List.of());
     }
 
     @Test

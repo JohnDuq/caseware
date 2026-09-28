@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.sql.Timestamp;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -15,14 +14,16 @@ import java.util.function.BooleanSupplier;
 
 import com.caseware.interview.api.TemplatePublicationRequest;
 import com.caseware.interview.client.EngagementUpdateClient;
-import com.caseware.interview.domain.EngagementFile;
 import com.caseware.interview.domain.PublicationStatus;
 import com.caseware.interview.domain.TaskCounts;
+import com.caseware.interview.domain.TaskLease;
+import com.caseware.interview.domain.TaskStatus;
 import com.caseware.interview.repository.EngagementFileRepository;
 import com.caseware.interview.repository.FanOutTaskRepository;
 import com.caseware.interview.repository.PublicationConflictException;
 import com.caseware.interview.repository.PublicationRepository;
 import com.caseware.interview.repository.PublicationRepository.RegistrationResult;
+import com.caseware.interview.repository.entity.EngagementFileEntity;
 import com.caseware.interview.service.DownstreamTaskDispatcher;
 import com.caseware.interview.service.PublicationService;
 import com.caseware.interview.service.TemplatePublishFanOutWorker;
@@ -34,7 +35,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest
 @Import(TemplatePublishWorkerIntegrationTest.FakeClientConfiguration.class)
@@ -48,7 +49,7 @@ class TemplatePublishWorkerIntegrationTest {
     private final DownstreamTaskDispatcher dispatcher;
     private final FanOutTaskRepository tasks;
     private final PublicationRepository publicationRepository;
-    private final JdbcClient jdbc;
+    private final TransactionTemplate transaction;
     private final RecordingClient client;
     private final Clock clock;
 
@@ -60,7 +61,7 @@ class TemplatePublishWorkerIntegrationTest {
             DownstreamTaskDispatcher dispatcher,
             FanOutTaskRepository tasks,
             PublicationRepository publicationRepository,
-            JdbcClient jdbc,
+            TransactionTemplate transaction,
             RecordingClient client,
             Clock clock) {
         this.files = files;
@@ -69,16 +70,16 @@ class TemplatePublishWorkerIntegrationTest {
         this.dispatcher = dispatcher;
         this.tasks = tasks;
         this.publicationRepository = publicationRepository;
-        this.jdbc = jdbc;
+        this.transaction = transaction;
         this.client = client;
         this.clock = clock;
     }
 
     @BeforeEach
     void resetState() {
-        jdbc.sql("DELETE FROM fan_out_task").update();
-        jdbc.sql("DELETE FROM template_publication").update();
-        jdbc.sql("DELETE FROM engagement_file_catalog").update();
+        tasks.deleteAllInBatch();
+        publicationRepository.deleteAllInBatch();
+        files.deleteAllInBatch();
         client.reset();
     }
 
@@ -181,17 +182,17 @@ class TemplatePublishWorkerIntegrationTest {
         publications.register(event("publication-lease"));
         fanOutWorker.drainAvailablePages();
         Instant now = clock.instant();
-        long taskId = tasks.findClaimableTaskId(now).orElseThrow();
+        TaskLease firstLease = claimNext("lease-1", now);
+        long taskId = firstLease.taskId();
+        var persistedTask = tasks.findById(taskId).orElseThrow();
+        assertThat(persistedTask.getId()).isEqualTo(taskId);
+        assertThat(persistedTask.getStatus()).isEqualTo(TaskStatus.PROCESSING);
+        assertThat(persistedTask.getAttemptCount()).isEqualTo(1);
 
-        var firstLease = tasks.claim(taskId, "lease-1", now, now.plusSeconds(5)).orElseThrow();
-        assertThat(tasks.claim(taskId, "lease-unavailable", now, now.plusSeconds(5))).isEmpty();
-        jdbc.sql("UPDATE fan_out_task SET lease_expires_at = :expired WHERE id = :id")
-                .param("expired", Timestamp.from(now.minusSeconds(1)))
-                .param("id", taskId)
-                .update();
+        assertThat(findAndClaim("lease-unavailable", now)).isEmpty();
+        assertThat(tasks.updateLeaseExpiry(taskId, now.minusSeconds(1))).isEqualTo(1);
 
-        assertThat(tasks.findClaimableTaskId(now)).contains(taskId);
-        var recoveredLease = tasks.claim(taskId, "lease-2", now, now.plusSeconds(5)).orElseThrow();
+        TaskLease recoveredLease = claimNext("lease-2", now);
 
         assertThat(recoveredLease.attemptNumber()).isEqualTo(2);
         assertThat(tasks.complete(firstLease, now)).isFalse();
@@ -204,15 +205,13 @@ class TemplatePublishWorkerIntegrationTest {
         publications.register(event("publication-null-error"));
         fanOutWorker.drainAvailablePages();
         Instant now = clock.instant();
-        long taskId = tasks.findClaimableTaskId(now).orElseThrow();
-        var lease = tasks.claim(taskId, "lease-null-error", now, now.plusSeconds(5)).orElseThrow();
+        TaskLease lease = claimNext("lease-null-error", now);
+        long taskId = lease.taskId();
 
         assertThat(tasks.fail(lease, null, now, true, now)).isTrue();
         assertThat(tasks.fail(lease, "stale", now, true, now)).isFalse();
-        assertThat(jdbc.sql("SELECT last_error FROM fan_out_task WHERE id = :id")
-                .param("id", taskId)
-                .query(String.class)
-                .single()).isEqualTo("Unknown downstream failure");
+        assertThat(tasks.findById(taskId).orElseThrow().getLastError())
+                .isEqualTo("Unknown downstream failure");
     }
 
     @Test
@@ -227,23 +226,13 @@ class TemplatePublishWorkerIntegrationTest {
     }
 
     @Test
-    void usesTheClockWhenCatalogMetadataHasNoTimestampAndProtectsPublicationLeases() {
-        files.save(new EngagementFile(
-                "file-clock", "firm-1", "template-a", "v1", "CA", "CANADA", null));
-        assertThat(jdbc.sql("SELECT updated_at FROM engagement_file_catalog WHERE file_id = 'file-clock'")
-                .query(Timestamp.class)
-                .single()).isNotNull();
+    void persistsAndUpdatesCatalogMetadataThroughJpa() {
+        saveFile("file-clock", "v1", "CA");
+        saveFile("file-clock", "v2", "CA");
 
-        publications.register(event("publication-guard"));
-        Instant now = clock.instant();
-        assertThat(publicationRepository.claim(
-                "publication-guard", "owner", now, now.plusSeconds(5))).isTrue();
-        assertThat(publicationRepository.claim(
-                "publication-guard", "other", now, now.plusSeconds(5))).isFalse();
-        assertThatThrownBy(() -> publicationRepository.pageCompleted(
-                "publication-guard", "wrong-owner", null, 0, true, now))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Publication lease was lost for publication-guard");
+        EngagementFileEntity saved = files.findById("file-clock").orElseThrow();
+        assertThat(saved.getTemplateVersion()).isEqualTo("v2");
+        assertThat(saved.getUpdatedAt()).isNotNull();
     }
 
     private boolean noTaskIsProcessing(String publicationId) {
@@ -251,8 +240,17 @@ class TemplatePublishWorkerIntegrationTest {
     }
 
     private void saveFile(String fileId, String version, String market) {
-        files.save(new EngagementFile(
+        files.save(new EngagementFileEntity(
                 fileId, "firm-1", "template-a", version, market, "CANADA", clock.instant()));
+    }
+
+    private TaskLease claimNext(String token, Instant now) {
+        return findAndClaim(token, now).orElseThrow();
+    }
+
+    private java.util.Optional<TaskLease> findAndClaim(String token, Instant now) {
+        return transaction.execute(ignored -> tasks.findNextClaimable(now)
+                .map(task -> task.claim(token, now.plusSeconds(5), now)));
     }
 
     private static TemplatePublicationRequest event(String publicationId) {

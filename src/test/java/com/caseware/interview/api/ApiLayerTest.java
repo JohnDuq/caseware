@@ -14,10 +14,10 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 
-import com.caseware.interview.domain.EngagementFile;
 import com.caseware.interview.domain.PublicationStatus;
 import com.caseware.interview.domain.TaskCounts;
 import com.caseware.interview.repository.EngagementFileRepository;
+import com.caseware.interview.repository.entity.EngagementFileEntity;
 import com.caseware.interview.repository.PublicationConflictException;
 import com.caseware.interview.repository.PublicationRepository.RegistrationResult;
 import com.caseware.interview.service.PublicationNotFoundException;
@@ -79,10 +79,16 @@ class ApiLayerTest {
         assertThat(controller.upsert("file-1", request).getStatusCode())
                 .isEqualTo(HttpStatus.NO_CONTENT);
 
-        ArgumentCaptor<EngagementFile> captor = ArgumentCaptor.forClass(EngagementFile.class);
+        ArgumentCaptor<EngagementFileEntity> captor = ArgumentCaptor.forClass(EngagementFileEntity.class);
         verify(fileRepository).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new EngagementFile(
-                "file-1", "firm-1", "template-a", "v3", "CA", "CANADA", NOW));
+        EngagementFileEntity saved = captor.getValue();
+        assertThat(saved.getFileId()).isEqualTo("file-1");
+        assertThat(saved.getFirmId()).isEqualTo("firm-1");
+        assertThat(saved.getTemplateId()).isEqualTo("template-a");
+        assertThat(saved.getTemplateVersion()).isEqualTo("v3");
+        assertThat(saved.getMarket()).isEqualTo("CA");
+        assertThat(saved.getRegion()).isEqualTo("CANADA");
+        assertThat(saved.getUpdatedAt()).isEqualTo(NOW);
     }
 
     @Test

@@ -2,15 +2,20 @@ package com.caseware.interview.service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.caseware.interview.config.WorkerProperties;
-import com.caseware.interview.domain.TemplatePublication;
 import com.caseware.interview.repository.EngagementFileRepository;
 import com.caseware.interview.repository.FanOutTaskRepository;
 import com.caseware.interview.repository.PublicationRepository;
+import com.caseware.interview.repository.entity.EngagementFileEntity;
+import com.caseware.interview.repository.entity.FanOutTaskEntity;
+import com.caseware.interview.repository.entity.TemplatePublicationEntity;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -62,33 +67,37 @@ public class TemplatePublishFanOutWorker {
     public boolean processOnePage() {
         Boolean processed = transaction.execute(ignored -> {
             Instant now = clock.instant();
-            TemplatePublication publication = publications.findClaimable(now).orElse(null);
+            TemplatePublicationEntity publication = publications.findNextClaimable(now).orElse(null);
             if (publication == null) {
                 return false;
             }
 
             String leaseToken = UUID.randomUUID().toString();
-            if (!publications.claim(
-                    publication.publicationId(),
-                    leaseToken,
-                    now,
-                    now.plus(properties.leaseDuration()))) {
-                return false;
-            }
+            publication.claim(leaseToken, now.plus(properties.leaseDuration()), now);
 
-            List<String> fileIds = files.findAffectedFileIds(
-                    publication.templateId(),
-                    publication.market(),
-                    publication.targetVersion(),
-                    publication.scanCursor(),
-                    properties.fanOutPageSize());
-            int inserted = tasks.createPendingTasks(publication.publicationId(), fileIds, now);
-            boolean complete = fileIds.size() < properties.fanOutPageSize();
-            String cursor = fileIds.isEmpty()
-                    ? publication.scanCursor()
-                    : fileIds.get(fileIds.size() - 1);
-            publications.pageCompleted(
-                    publication.publicationId(), leaseToken, cursor, inserted, complete, now);
+            List<EngagementFileEntity> affectedFiles = files.findAffectedFiles(
+                    publication.getTemplateId(),
+                    publication.getMarket(),
+                    publication.getTargetVersion(),
+                    publication.getScanCursor() == null ? "" : publication.getScanCursor(),
+                    PageRequest.of(0, properties.fanOutPageSize()));
+            List<String> fileIds = affectedFiles.stream()
+                    .map(EngagementFileEntity::getFileId)
+                    .toList();
+            Set<String> existingIds = fileIds.isEmpty()
+                    ? Set.of()
+                    : new HashSet<>(tasks.findExistingFileIds(publication.getPublicationId(), fileIds));
+            List<FanOutTaskEntity> newTasks = affectedFiles.stream()
+                    .filter(file -> !existingIds.contains(file.getFileId()))
+                    .map(file -> new FanOutTaskEntity(publication, file, now))
+                    .toList();
+            tasks.saveAll(newTasks);
+            int inserted = newTasks.size();
+            boolean complete = affectedFiles.size() < properties.fanOutPageSize();
+            String cursor = affectedFiles.isEmpty()
+                    ? publication.getScanCursor()
+                    : affectedFiles.get(affectedFiles.size() - 1).getFileId();
+            publication.completePage(cursor, inserted, complete, now);
             metrics.counter("caseware.fanout.tasks.created").increment(inserted);
             if (complete) {
                 metrics.counter("caseware.fanout.publications.completed").increment();

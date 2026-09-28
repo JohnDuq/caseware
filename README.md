@@ -2,7 +2,7 @@
 
 Bounded Java implementation for the Caseware Staff Java Developer take-home exercise. The service accepts Product Template publication events, discovers affected Engagement Files from a lightweight catalog, creates durable work items, and invokes a capacity-constrained downstream service.
 
-The local implementation uses Java 21, Spring Boot 4.1, Maven, JDBC, and H2. H2 runs as a file database for local execution and as an in-memory database in tests.
+The local implementation uses Java 21, Spring Boot 4.1, Maven, Spring Data JPA with Hibernate, and H2. H2 runs as a file database for local execution and as an in-memory database in tests.
 
 ## Design goals
 
@@ -65,6 +65,8 @@ The bundled downstream adapter logs successful calls immediately. A production a
 ## Main implementation choices and trade-offs
 
 `TemplatePublishFanOutWorker` claims one publication page in a database transaction. It inserts missing tasks and advances the scan cursor atomically. A crash before commit repeats the page safely; a crash after commit resumes from the next cursor.
+
+The persistence layer consists of three Spring Data `JpaRepository` interfaces marked with `@Repository`. JPQL queries select eligible files and acquire pessimistic locks when claiming publications or tasks. Hibernate manages schema creation for this self-contained exercise.
 
 `DownstreamTaskDispatcher` claims durable tasks and submits only as many calls as its semaphore allows. The limit is local to an application instance. In production, instance count multiplied by `worker.max-concurrency` must remain below the downstream team's agreed global capacity; a shared rate limiter or queue concurrency setting should enforce that global contract.
 

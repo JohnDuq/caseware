@@ -1,8 +1,5 @@
 package com.caseware.interview.repository;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
@@ -12,128 +9,128 @@ import java.util.Optional;
 import com.caseware.interview.domain.TaskCounts;
 import com.caseware.interview.domain.TaskLease;
 import com.caseware.interview.domain.TaskStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
+import com.caseware.interview.repository.entity.FanOutTaskEntity;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-public class FanOutTaskRepository {
+public interface FanOutTaskRepository extends JpaRepository<FanOutTaskEntity, Long> {
 
-    private final JdbcClient jdbc;
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT task
+            FROM FanOutTaskEntity task
+            JOIN FETCH task.publication
+            JOIN FETCH task.file
+            WHERE ((task.status IN :readyStatuses AND task.nextAttemptAt <= :now)
+                OR (task.status = :processingStatus AND task.leaseExpiresAt < :now))
+            ORDER BY task.nextAttemptAt, task.id
+            """)
+    List<FanOutTaskEntity> findClaimable(
+            @Param("readyStatuses") List<TaskStatus> readyStatuses,
+            @Param("processingStatus") TaskStatus processingStatus,
+            @Param("now") Instant now,
+            Pageable page);
 
-    public FanOutTaskRepository(JdbcClient jdbc) {
-        this.jdbc = jdbc;
+    default Optional<FanOutTaskEntity> findNextClaimable(Instant now) {
+        return findClaimable(
+                List.of(TaskStatus.PENDING, TaskStatus.RETRY),
+                TaskStatus.PROCESSING,
+                now,
+                PageRequest.of(0, 1))
+                .stream()
+                .findFirst();
     }
 
-    public int createPendingTasks(String publicationId, List<String> fileIds, Instant now) {
-        int inserted = 0;
-        for (String fileId : fileIds) {
-            inserted += jdbc.sql("""
-                    INSERT INTO fan_out_task
-                        (publication_id, file_id, status, attempt_count, next_attempt_at, created_at, updated_at)
-                    SELECT :publicationId, :fileId, 'PENDING', 0, :now, :now, :now
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM fan_out_task
-                        WHERE publication_id = :publicationId AND file_id = :fileId
-                    )
-                    """)
-                    .param("publicationId", publicationId)
-                    .param("fileId", fileId)
-                    .param("now", Timestamp.from(now))
-                    .update();
-        }
-        return inserted;
+    @Query("""
+            SELECT task.file.fileId
+            FROM FanOutTaskEntity task
+            WHERE task.publication.publicationId = :publicationId
+              AND task.file.fileId IN :fileIds
+            """)
+    List<String> findExistingFileIds(
+            @Param("publicationId") String publicationId,
+            @Param("fileIds") List<String> fileIds);
+
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE FanOutTaskEntity task
+            SET task.status = :succeeded,
+                task.leaseToken = NULL,
+                task.leaseExpiresAt = NULL,
+                task.lastError = NULL,
+                task.updatedAt = :now
+            WHERE task.id = :taskId
+              AND task.status = :processing
+              AND task.leaseToken = :leaseToken
+            """)
+    int completeLease(
+            @Param("taskId") long taskId,
+            @Param("leaseToken") String leaseToken,
+            @Param("now") Instant now,
+            @Param("processing") TaskStatus processing,
+            @Param("succeeded") TaskStatus succeeded);
+
+    default boolean complete(TaskLease lease, Instant now) {
+        return completeLease(
+                lease.taskId(), lease.leaseToken(), now,
+                TaskStatus.PROCESSING, TaskStatus.SUCCEEDED) == 1;
     }
 
-    public Optional<Long> findClaimableTaskId(Instant now) {
-        return jdbc.sql("""
-                SELECT id
-                FROM fan_out_task
-                WHERE ((status IN ('PENDING', 'RETRY') AND next_attempt_at <= :now)
-                    OR (status = 'PROCESSING' AND lease_expires_at < :now))
-                ORDER BY next_attempt_at, id
-                FETCH FIRST 1 ROWS ONLY
-                """)
-                .param("now", Timestamp.from(now))
-                .query(Long.class)
-                .optional();
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE FanOutTaskEntity task
+            SET task.status = :newStatus,
+                task.nextAttemptAt = :retryAt,
+                task.leaseToken = NULL,
+                task.leaseExpiresAt = NULL,
+                task.lastError = :error,
+                task.updatedAt = :now
+            WHERE task.id = :taskId
+              AND task.status = :processing
+              AND task.leaseToken = :leaseToken
+            """)
+    int failLease(
+            @Param("taskId") long taskId,
+            @Param("leaseToken") String leaseToken,
+            @Param("error") String error,
+            @Param("retryAt") Instant retryAt,
+            @Param("newStatus") TaskStatus newStatus,
+            @Param("processing") TaskStatus processing,
+            @Param("now") Instant now);
+
+    default boolean fail(TaskLease lease, String error, Instant retryAt, boolean terminal, Instant now) {
+        String safeError = error == null
+                ? "Unknown downstream failure"
+                : error.substring(0, Math.min(1000, error.length()));
+        return failLease(
+                lease.taskId(), lease.leaseToken(), safeError, retryAt,
+                terminal ? TaskStatus.DEAD_LETTER : TaskStatus.RETRY,
+                TaskStatus.PROCESSING, now) == 1;
     }
 
-    public Optional<TaskLease> claim(long taskId, String leaseToken, Instant now, Instant leaseExpiresAt) {
-        int updated = jdbc.sql("""
-                UPDATE fan_out_task
-                SET status = 'PROCESSING', attempt_count = attempt_count + 1,
-                    lease_token = :leaseToken, lease_expires_at = :leaseExpiresAt, updated_at = :now
-                WHERE id = :taskId
-                  AND ((status IN ('PENDING', 'RETRY') AND next_attempt_at <= :now)
-                    OR (status = 'PROCESSING' AND lease_expires_at < :now))
-                """)
-                .param("leaseToken", leaseToken)
-                .param("leaseExpiresAt", Timestamp.from(leaseExpiresAt))
-                .param("now", Timestamp.from(now))
-                .param("taskId", taskId)
-                .update();
-        if (updated == 0) {
-            return Optional.empty();
-        }
+    @Query("""
+            SELECT task.status AS status, COUNT(task) AS total
+            FROM FanOutTaskEntity task
+            WHERE task.publication.publicationId = :publicationId
+            GROUP BY task.status
+            """)
+    List<TaskStatusCount> countByStatus(@Param("publicationId") String publicationId);
 
-        return jdbc.sql("""
-                SELECT t.id, t.publication_id, t.file_id, p.target_version,
-                       t.lease_token, t.attempt_count
-                FROM fan_out_task t
-                JOIN template_publication p ON p.publication_id = t.publication_id
-                WHERE t.id = :taskId AND t.lease_token = :leaseToken
-                """)
-                .param("taskId", taskId)
-                .param("leaseToken", leaseToken)
-                .query(FanOutTaskRepository::mapLease)
-                .optional();
-    }
-
-    public boolean complete(TaskLease lease, Instant now) {
-        return jdbc.sql("""
-                UPDATE fan_out_task
-                SET status = 'SUCCEEDED', lease_token = NULL, lease_expires_at = NULL,
-                    last_error = NULL, updated_at = :now
-                WHERE id = :taskId AND status = 'PROCESSING' AND lease_token = :leaseToken
-                """)
-                .param("now", Timestamp.from(now))
-                .param("taskId", lease.taskId())
-                .param("leaseToken", lease.leaseToken())
-                .update() == 1;
-    }
-
-    public boolean fail(TaskLease lease, String error, Instant retryAt, boolean terminal, Instant now) {
-        String safeError = error == null ? "Unknown downstream failure" : error.substring(0, Math.min(1000, error.length()));
-        return jdbc.sql("""
-                UPDATE fan_out_task
-                SET status = :status, next_attempt_at = :retryAt,
-                    lease_token = NULL, lease_expires_at = NULL,
-                    last_error = :error, updated_at = :now
-                WHERE id = :taskId AND status = 'PROCESSING' AND lease_token = :leaseToken
-                """)
-                .param("status", terminal ? "DEAD_LETTER" : "RETRY")
-                .param("retryAt", Timestamp.from(retryAt))
-                .param("error", safeError)
-                .param("now", Timestamp.from(now))
-                .param("taskId", lease.taskId())
-                .param("leaseToken", lease.leaseToken())
-                .update() == 1;
-    }
-
-    public TaskCounts countsForPublication(String publicationId) {
+    default TaskCounts countsForPublication(String publicationId) {
         Map<TaskStatus, Long> counts = new EnumMap<>(TaskStatus.class);
-        jdbc.sql("""
-                SELECT status, COUNT(*) AS task_count
-                FROM fan_out_task
-                WHERE publication_id = :publicationId
-                GROUP BY status
-                """)
-                .param("publicationId", publicationId)
-                .query((rs, rowNum) -> Map.entry(
-                        TaskStatus.valueOf(rs.getString("status")),
-                        rs.getLong("task_count")))
-                .list()
-                .forEach(entry -> counts.put(entry.getKey(), entry.getValue()));
+        countByStatus(publicationId)
+                .forEach(row -> counts.put(row.getStatus(), row.getTotal()));
         return new TaskCounts(
                 counts.getOrDefault(TaskStatus.PENDING, 0L),
                 counts.getOrDefault(TaskStatus.PROCESSING, 0L),
@@ -142,13 +139,8 @@ public class FanOutTaskRepository {
                 counts.getOrDefault(TaskStatus.DEAD_LETTER, 0L));
     }
 
-    private static TaskLease mapLease(ResultSet rs, int rowNum) throws SQLException {
-        return new TaskLease(
-                rs.getLong("id"),
-                rs.getString("publication_id"),
-                rs.getString("file_id"),
-                rs.getString("target_version"),
-                rs.getString("lease_token"),
-                rs.getInt("attempt_count"));
-    }
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query("UPDATE FanOutTaskEntity task SET task.leaseExpiresAt = :expiry WHERE task.id = :taskId")
+    int updateLeaseExpiry(@Param("taskId") long taskId, @Param("expiry") Instant expiry);
 }
