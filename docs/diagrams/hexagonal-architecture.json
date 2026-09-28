@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Arquitectura de puertos y adaptadores",
+    "title": "Ports and Adapters Architecture",
     "output": "docs/diagrams/hexagonal-architecture.html",
     "quality_profile": "showcase",
     "repository": {
@@ -16,8 +16,8 @@
     {
       "id": "rest",
       "type": "frontend",
-      "label": "Adaptadores REST",
-      "sublabel": "publicaciones y archivos",
+      "label": "REST Adapters",
+      "sublabel": "publications and files",
       "pos": [40, 210],
       "size": [160, 72],
       "sources": [
@@ -28,8 +28,8 @@
     {
       "id": "schedulers",
       "type": "messagebus",
-      "label": "Planificadores",
-      "sublabel": "fan-out y despacho",
+      "label": "Schedulers",
+      "sublabel": "fan-out and dispatch",
       "pos": [40, 390],
       "size": [160, 72],
       "sources": [
@@ -40,8 +40,8 @@
     {
       "id": "input_ports",
       "type": "backend",
-      "label": "Puertos de entrada",
-      "sublabel": "contratos de casos de uso",
+      "label": "Input Ports",
+      "sublabel": "use case contracts",
       "pos": [290, 300],
       "size": [170, 72],
       "sources": [
@@ -53,8 +53,8 @@
     {
       "id": "services",
       "type": "backend",
-      "label": "Servicios de aplicación",
-      "sublabel": "reglas y coordinación",
+      "label": "Application Services",
+      "sublabel": "rules and coordination",
       "pos": [560, 300],
       "size": [180, 72],
       "sources": [
@@ -66,8 +66,8 @@
     {
       "id": "output_ports",
       "type": "backend",
-      "label": "Puertos de salida",
-      "sublabel": "persistencia y downstream",
+      "label": "Output Ports",
+      "sublabel": "persistence and downstream",
       "pos": [840, 300],
       "size": [170, 72],
       "sources": [
@@ -79,8 +79,8 @@
     {
       "id": "jpa",
       "type": "database",
-      "label": "Adaptadores JPA",
-      "sublabel": "Spring Data + transacciones",
+      "label": "JPA Adapters",
+      "sublabel": "Spring Data + transactions",
       "pos": [1090, 180],
       "size": [180, 72],
       "sources": [
@@ -93,7 +93,7 @@
       "id": "h2",
       "type": "database",
       "label": "H2",
-      "sublabel": "publicaciones, catálogo y tareas",
+      "sublabel": "publications, catalog, and tasks",
       "pos": [1360, 180],
       "size": [180, 72],
       "sources": [
@@ -105,8 +105,8 @@
     {
       "id": "downstream_adapter",
       "type": "cloud",
-      "label": "Adaptador downstream",
-      "sublabel": "simulación por logging",
+      "label": "Downstream Adapter",
+      "sublabel": "logging simulation",
       "pos": [1090, 430],
       "size": [180, 72],
       "sources": [
@@ -116,8 +116,8 @@
     {
       "id": "external_service",
       "type": "external",
-      "label": "Servicio de Engagement",
-      "sublabel": "contrato externo simulado",
+      "label": "Engagement Service",
+      "sublabel": "simulated external contract",
       "pos": [1400, 430],
       "size": [180, 72],
       "sources": [
@@ -129,7 +129,7 @@
       "id": "composition",
       "type": "cloud",
       "label": "WorkerConfiguration",
-      "sublabel": "composición por constructor",
+      "sublabel": "constructor-based composition",
       "pos": [560, 70],
       "size": [180, 72],
       "sources": [
@@ -138,32 +138,32 @@
     }
   ],
   "connections": [
-    { "id": "rest_input", "from": "rest", "to": "input_ports", "label": "invoca", "variant": "emphasis" },
-    { "id": "scheduler_input", "from": "schedulers", "to": "input_ports", "label": "activa", "variant": "dashed" },
-    { "id": "input_services", "from": "input_ports", "to": "services", "label": "implementado por" },
-    { "id": "services_output", "from": "services", "to": "output_ports", "label": "depende de" },
-    { "id": "output_jpa", "from": "output_ports", "to": "jpa", "label": "implementación JPA", "fromSide": "right", "toSide": "left" },
-    { "id": "jpa_h2", "from": "jpa", "to": "h2", "label": "lee y escribe" },
-    { "id": "output_downstream", "from": "output_ports", "to": "downstream_adapter", "label": "implementación externa", "fromSide": "right", "toSide": "left" },
-    { "id": "adapter_external", "from": "downstream_adapter", "to": "external_service", "label": "evalúa actualización" },
-    { "id": "composition_services", "from": "composition", "to": "services", "label": "conecta beans", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+    { "id": "rest_input", "from": "rest", "to": "input_ports", "label": "invokes", "variant": "emphasis" },
+    { "id": "scheduler_input", "from": "schedulers", "to": "input_ports", "label": "triggers", "variant": "dashed" },
+    { "id": "input_services", "from": "input_ports", "to": "services", "label": "implemented by" },
+    { "id": "services_output", "from": "services", "to": "output_ports", "label": "depends on" },
+    { "id": "output_jpa", "from": "output_ports", "to": "jpa", "label": "JPA implementation", "fromSide": "right", "toSide": "left" },
+    { "id": "jpa_h2", "from": "jpa", "to": "h2", "label": "reads and writes" },
+    { "id": "output_downstream", "from": "output_ports", "to": "downstream_adapter", "label": "external implementation", "fromSide": "right", "toSide": "left" },
+    { "id": "adapter_external", "from": "downstream_adapter", "to": "external_service", "label": "evaluates update" },
+    { "id": "composition_services", "from": "composition", "to": "services", "label": "wires beans", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Dirección de dependencias",
+      "title": "Dependency Direction",
       "items": [
-        "Los adaptadores de entrada conocen únicamente puertos de entrada",
-        "Los servicios de aplicación dependen únicamente de puertos de salida",
-        "Spring y JPA quedan fuera del dominio y de la aplicación"
+        "Inbound adapters know only input ports",
+        "Application services depend only on output ports",
+        "Spring and JPA remain outside the domain and application layers"
       ]
     },
     {
       "dot": "emerald",
-      "title": "Composición",
+      "title": "Composition",
       "items": [
-        "WorkerConfiguration conecta puertos con implementaciones concretas",
-        "Lombok genera los constructores usados por la inyección"
+        "WorkerConfiguration connects ports to concrete implementations",
+        "Lombok generates the constructors used for dependency injection"
       ]
     }
   ]

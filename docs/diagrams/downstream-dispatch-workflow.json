@@ -2,7 +2,7 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "Despacho downstream, capacidad y reintentos",
+    "title": "Downstream Dispatch, Capacity, and Retries",
     "output": "docs/diagrams/downstream-dispatch-workflow.html",
     "viewBox": [1240, 786],
     "quality_profile": "showcase",
@@ -14,16 +14,16 @@
     }
   },
   "lanes": [
-    { "id": "trigger", "label": "Planificador" },
-    { "id": "application", "label": "Servicio de aplicación" },
-    { "id": "persistence", "label": "Persistencia" },
-    { "id": "external", "label": "Servicio downstream" },
-    { "id": "failure", "label": "Recuperación", "variant": "exception" }
+    { "id": "trigger", "label": "Scheduler" },
+    { "id": "application", "label": "Application Service" },
+    { "id": "persistence", "label": "Persistence" },
+    { "id": "external", "label": "Downstream Service" },
+    { "id": "failure", "label": "Recovery", "variant": "exception" }
   ],
   "phases": [
-    { "id": "acquire", "label": "Adquirir trabajo", "fromCol": 0, "toCol": 2 },
-    { "id": "execute", "label": "Ejecutar", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
-    { "id": "settle", "label": "Confirmar o reintentar", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+    { "id": "acquire", "label": "Acquire Work", "fromCol": 0, "toCol": 2 },
+    { "id": "execute", "label": "Execute", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "settle", "label": "Complete or Retry", "fromCol": 5, "toCol": 5, "variant": "dashed" }
   ],
   "mainPath": ["tick", "capacity", "claim", "submit", "call", "succeeded"],
   "nodes": [
@@ -32,7 +32,7 @@
       "lane": "trigger",
       "col": 0,
       "type": "messagebus",
-      "label": "Tick programado",
+      "label": "Scheduled Tick",
       "sublabel": "dispatchAvailable",
       "width": 140,
       "sources": [
@@ -44,9 +44,9 @@
       "lane": "application",
       "col": 1,
       "type": "security",
-      "label": "Cupo disponible",
+      "label": "Capacity Available",
       "sublabel": "Semaphore.tryAcquire",
-      "tag": "límite local",
+      "tag": "local limit",
       "width": 144,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 32, "end_line": 43 }
@@ -57,8 +57,8 @@
       "lane": "persistence",
       "col": 2,
       "type": "database",
-      "label": "Reclamar tarea",
-      "sublabel": "lease transaccional",
+      "label": "Claim Task",
+      "sublabel": "transactional lease",
       "width": 140,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 47, "end_line": 55 },
@@ -70,8 +70,8 @@
       "lane": "application",
       "col": 3,
       "type": "backend",
-      "label": "Enviar al executor",
-      "sublabel": "procesamiento acotado",
+      "label": "Submit to Executor",
+      "sublabel": "bounded processing",
       "width": 146,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 35, "end_line": 43 }
@@ -82,8 +82,8 @@
       "lane": "external",
       "col": 4,
       "type": "external",
-      "label": "Evaluar actualización",
-      "sublabel": "idempotency key estable",
+      "label": "Evaluate Update",
+      "sublabel": "stable idempotency key",
       "width": 152,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 58, "end_line": 64 },
@@ -96,7 +96,7 @@
       "col": 5,
       "type": "database",
       "label": "SUCCEEDED",
-      "sublabel": "lease confirmado",
+      "sublabel": "lease confirmed",
       "width": 138,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 70, "end_line": 74 },
@@ -108,8 +108,8 @@
       "lane": "failure",
       "col": 3,
       "type": "backend",
-      "label": "Sin tarea",
-      "sublabel": "libera cupo y termina",
+      "label": "No Task",
+      "sublabel": "release permit and stop",
       "width": 140,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 36, "end_line": 40 }
@@ -120,8 +120,8 @@
       "lane": "failure",
       "col": 4,
       "type": "security",
-      "label": "Fallo downstream",
-      "sublabel": "clasifica por intentos",
+      "label": "Downstream Failure",
+      "sublabel": "classify by attempts",
       "width": 148,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 65, "end_line": 73 }
@@ -133,7 +133,7 @@
       "col": 5,
       "type": "messagebus",
       "label": "RETRY",
-      "sublabel": "backoff exponencial",
+      "sublabel": "exponential backoff",
       "width": 132,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 67, "end_line": 81 },
@@ -146,7 +146,7 @@
       "col": 5,
       "type": "security",
       "label": "DEAD_LETTER",
-      "sublabel": "máximo de intentos",
+      "sublabel": "maximum attempts",
       "width": 140,
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 65, "end_line": 72 },
@@ -155,31 +155,31 @@
     }
   ],
   "edges": [
-    { "id": "tick_capacity", "from": "tick", "to": "capacity", "label": "intenta cupo", "variant": "emphasis" },
-    { "id": "capacity_claim", "from": "capacity", "to": "claim", "label": "cupo adquirido" },
+    { "id": "tick_capacity", "from": "tick", "to": "capacity", "label": "try permit", "variant": "emphasis" },
+    { "id": "capacity_claim", "from": "capacity", "to": "claim", "label": "permit acquired" },
     { "id": "claim_submit", "from": "claim", "to": "submit", "label": "lease" },
     { "id": "submit_call", "from": "submit", "to": "call", "label": "async", "role": "async", "variant": "dashed" },
-    { "id": "call_success", "from": "call", "to": "succeeded", "label": "éxito", "variant": "emphasis" },
-    { "id": "claim_empty", "from": "claim", "to": "no_work", "label": "vacío", "role": "branch", "variant": "dashed" },
-    { "id": "call_failure", "from": "call", "to": "failed_call", "label": "excepción", "role": "error", "variant": "security" },
-    { "id": "failure_retry", "from": "failed_call", "to": "retry", "label": "quedan intentos", "role": "branch", "variant": "dashed" },
-    { "id": "failure_dead", "from": "failed_call", "to": "dead_letter", "label": "límite alcanzado", "role": "error", "variant": "security" }
+    { "id": "call_success", "from": "call", "to": "succeeded", "label": "success", "variant": "emphasis" },
+    { "id": "claim_empty", "from": "claim", "to": "no_work", "label": "empty", "role": "branch", "variant": "dashed" },
+    { "id": "call_failure", "from": "call", "to": "failed_call", "label": "exception", "role": "error", "variant": "security" },
+    { "id": "failure_retry", "from": "failed_call", "to": "retry", "label": "attempts remain", "role": "branch", "variant": "dashed" },
+    { "id": "failure_dead", "from": "failed_call", "to": "dead_letter", "label": "limit reached", "role": "error", "variant": "security" }
   ],
   "cards": [
     {
       "dot": "amber",
-      "title": "Protección de capacidad",
+      "title": "Capacity Protection",
       "items": [
-        "El semáforo limita llamadas simultáneas antes de reclamar trabajo",
-        "El cupo siempre se libera en finally"
+        "The semaphore limits concurrent calls before work is claimed",
+        "The permit is always released in the finally block"
       ]
     },
     {
       "dot": "rose",
-      "title": "Recuperación",
+      "title": "Recovery",
       "items": [
-        "Los fallos temporales esperan con backoff exponencial",
-        "El último intento termina en DEAD_LETTER"
+        "Temporary failures wait with exponential backoff",
+        "The final failed attempt moves to DEAD_LETTER"
       ]
     }
   ]

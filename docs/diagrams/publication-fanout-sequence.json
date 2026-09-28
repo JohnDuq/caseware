@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "Secuencia de publicación y fan-out",
+    "title": "Publication and Fan-out Sequence",
     "output": "docs/diagrams/publication-fanout-sequence.html",
     "viewBox": [1080, 690],
     "column_fit": "spread",
@@ -18,8 +18,8 @@
     {
       "id": "client",
       "type": "external",
-      "label": "Cliente API",
-      "sublabel": "evento publicado",
+      "label": "API Client",
+      "sublabel": "published event",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/in/web/TemplatePublicationController.java", "line": 26, "end_line": 38 }
       ]
@@ -28,7 +28,7 @@
       "id": "controller",
       "type": "frontend",
       "label": "Controller",
-      "sublabel": "adaptador REST",
+      "sublabel": "REST adapter",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/in/web/TemplatePublicationController.java", "line": 19, "end_line": 44 }
       ]
@@ -36,8 +36,8 @@
     {
       "id": "publication_service",
       "type": "backend",
-      "label": "Registro",
-      "sublabel": "servicio idempotente",
+      "label": "Registration",
+      "sublabel": "idempotent service",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/PublicationApplicationService.java", "line": 24, "end_line": 40 }
       ]
@@ -45,7 +45,7 @@
     {
       "id": "publication_store",
       "type": "database",
-      "label": "Publicaciones",
+      "label": "Publications",
       "sublabel": "store JPA + H2",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaPublicationAdapter.java", "line": 23, "end_line": 53 }
@@ -55,7 +55,7 @@
       "id": "scheduler",
       "type": "messagebus",
       "label": "Scheduler",
-      "sublabel": "poll de fan-out",
+      "sublabel": "fan-out polling",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/in/scheduler/TemplatePublishScheduler.java", "line": 16, "end_line": 20 }
       ]
@@ -64,7 +64,7 @@
       "id": "fanout",
       "type": "backend",
       "label": "Fan-out Service",
-      "sublabel": "página transaccional",
+      "sublabel": "transactional page",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/application/service/TemplatePublishFanOutService.java", "line": 30, "end_line": 73 }
       ]
@@ -82,29 +82,29 @@
       "id": "task_store",
       "type": "database",
       "label": "Task Store",
-      "sublabel": "tareas idempotentes",
+      "sublabel": "idempotent tasks",
       "sources": [
         { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 32, "end_line": 55 }
       ]
     }
   ],
   "segments": [
-    { "from": 150, "to": 280, "label": "Registro idempotente" },
-    { "from": 290, "to": 575, "label": "Fan-out por página" }
+    { "from": 150, "to": 280, "label": "Idempotent Registration" },
+    { "from": 290, "to": 575, "label": "Paginated Fan-out" }
   ],
   "messages": [
     { "id": "post", "from": "client", "to": "controller", "y": 170, "label": "POST /template-publications", "variant": "emphasis" },
     { "id": "register", "from": "controller", "to": "publication_service", "y": 200, "label": "register(command)" },
     { "id": "create", "from": "publication_service", "to": "publication_store", "y": 230, "label": "create(publication)" },
-    { "id": "registered", "from": "publication_store", "to": "publication_service", "y": 260, "label": "CREATED o DUPLICATE", "variant": "return" },
+    { "id": "registered", "from": "publication_store", "to": "publication_service", "y": 260, "label": "CREATED or DUPLICATE", "variant": "return" },
     { "id": "accepted", "from": "controller", "to": "client", "y": 285, "label": "202 + idempotency result", "variant": "return" },
     { "id": "tick", "from": "scheduler", "to": "fanout", "y": 325, "label": "drainAvailablePages()", "variant": "dashed" },
     { "id": "claim", "from": "fanout", "to": "publication_store", "y": 360, "label": "claim next publication" },
     { "id": "publication", "from": "publication_store", "to": "fanout", "y": 390, "label": "publication + cursor", "variant": "return" },
     { "id": "affected", "from": "fanout", "to": "catalog", "y": 425, "label": "findAffected(cursor, limit)", "variant": "emphasis" },
-    { "id": "page", "from": "catalog", "to": "fanout", "y": 455, "label": "página ordenada", "variant": "return" },
+    { "id": "page", "from": "catalog", "to": "fanout", "y": 455, "label": "ordered page", "variant": "return" },
     { "id": "tasks", "from": "fanout", "to": "task_store", "y": 490, "label": "createPendingTasks()" },
-    { "id": "inserted", "from": "task_store", "to": "fanout", "y": 520, "label": "cantidad insertada", "variant": "return" },
+    { "id": "inserted", "from": "task_store", "to": "fanout", "y": 520, "label": "inserted count", "variant": "return" },
     { "id": "complete", "from": "fanout", "to": "publication_store", "y": 555, "label": "completePage(cursor, total)" }
   ],
   "activations": [
@@ -119,11 +119,11 @@
   "cards": [
     {
       "dot": "emerald",
-      "title": "Consistencia",
+      "title": "Consistency",
       "items": [
-        "publicationId hace idempotente la recepción del evento",
-        "La creación de tareas y el avance del cursor ocurren en una transacción",
-        "Cada página mantiene un tamaño acotado"
+        "publicationId makes event reception idempotent",
+        "Task creation and cursor advancement run in one transaction",
+        "Each page has a bounded size"
       ]
     }
   ]

@@ -1,10 +1,10 @@
-# Diagramas interactivos
+# Interactive Diagrams
 
-Estos diagramas se generan con Archify y se validan contra el código de la revisión indicada dentro de cada archivo fuente JSON.
+These diagrams are generated with Archify and validated against the code revision recorded in each JSON source file.
 
-- [Arquitectura de puertos y adaptadores](hexagonal-architecture.html)
-- [Secuencia de publicación y fan-out](publication-fanout-sequence.html)
-- [Despacho downstream, capacidad y reintentos](downstream-dispatch-workflow.html)
-- [Ciclo de vida de una tarea de fan-out](task-lifecycle.html)
+- [Ports and adapters architecture](hexagonal-architecture.html)
+- [Publication and fan-out sequence](publication-fanout-sequence.html)
+- [Downstream dispatch, capacity, and retries](downstream-dispatch-workflow.html)
+- [Fan-out task lifecycle](task-lifecycle.html)
 
-Cada HTML es autocontenido, admite tema claro u oscuro y permite exportar el diagrama desde el navegador. Los archivos JSON conservan la especificación y las referencias a las líneas de código utilizadas como evidencia.
+Each HTML file is self-contained, supports light and dark themes, and can export the diagram from the browser. The JSON files preserve the specification and references to the source-code lines used as evidence.
