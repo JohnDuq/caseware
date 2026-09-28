@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.sql.Timestamp;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -20,6 +21,7 @@ import com.caseware.interview.domain.TaskCounts;
 import com.caseware.interview.repository.EngagementFileRepository;
 import com.caseware.interview.repository.FanOutTaskRepository;
 import com.caseware.interview.repository.PublicationConflictException;
+import com.caseware.interview.repository.PublicationRepository;
 import com.caseware.interview.repository.PublicationRepository.RegistrationResult;
 import com.caseware.interview.service.DownstreamTaskDispatcher;
 import com.caseware.interview.service.PublicationService;
@@ -45,6 +47,7 @@ class TemplatePublishWorkerIntegrationTest {
     private final TemplatePublishFanOutWorker fanOutWorker;
     private final DownstreamTaskDispatcher dispatcher;
     private final FanOutTaskRepository tasks;
+    private final PublicationRepository publicationRepository;
     private final JdbcClient jdbc;
     private final RecordingClient client;
     private final Clock clock;
@@ -56,6 +59,7 @@ class TemplatePublishWorkerIntegrationTest {
             TemplatePublishFanOutWorker fanOutWorker,
             DownstreamTaskDispatcher dispatcher,
             FanOutTaskRepository tasks,
+            PublicationRepository publicationRepository,
             JdbcClient jdbc,
             RecordingClient client,
             Clock clock) {
@@ -64,6 +68,7 @@ class TemplatePublishWorkerIntegrationTest {
         this.fanOutWorker = fanOutWorker;
         this.dispatcher = dispatcher;
         this.tasks = tasks;
+        this.publicationRepository = publicationRepository;
         this.jdbc = jdbc;
         this.client = client;
         this.clock = clock;
@@ -150,6 +155,101 @@ class TemplatePublishWorkerIntegrationTest {
         assertThat(counts.deadLetter()).isZero();
     }
 
+    @Test
+    void movesPermanentlyFailingCallsToDeadLetterAfterTheAttemptLimit() throws Exception {
+        saveFile("file-dead", "v1", "CA");
+        publications.register(event("publication-dead"));
+        fanOutWorker.drainAvailablePages();
+        client.failEveryCallFor("file-dead");
+
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            assertThat(dispatcher.dispatchAvailable()).isEqualTo(1);
+            int expectedAttempts = attempt;
+            await(() -> client.attemptsFor("file-dead") == expectedAttempts
+                    && noTaskIsProcessing("publication-dead"));
+            Thread.sleep(10);
+        }
+
+        TaskCounts counts = tasks.countsForPublication("publication-dead");
+        assertThat(counts.deadLetter()).isEqualTo(1);
+        assertThat(counts.retrying()).isZero();
+    }
+
+    @Test
+    void reclaimsAnExpiredTaskLeaseAndRejectsStaleCompletion() {
+        saveFile("file-lease", "v1", "CA");
+        publications.register(event("publication-lease"));
+        fanOutWorker.drainAvailablePages();
+        Instant now = clock.instant();
+        long taskId = tasks.findClaimableTaskId(now).orElseThrow();
+
+        var firstLease = tasks.claim(taskId, "lease-1", now, now.plusSeconds(5)).orElseThrow();
+        assertThat(tasks.claim(taskId, "lease-unavailable", now, now.plusSeconds(5))).isEmpty();
+        jdbc.sql("UPDATE fan_out_task SET lease_expires_at = :expired WHERE id = :id")
+                .param("expired", Timestamp.from(now.minusSeconds(1)))
+                .param("id", taskId)
+                .update();
+
+        assertThat(tasks.findClaimableTaskId(now)).contains(taskId);
+        var recoveredLease = tasks.claim(taskId, "lease-2", now, now.plusSeconds(5)).orElseThrow();
+
+        assertThat(recoveredLease.attemptNumber()).isEqualTo(2);
+        assertThat(tasks.complete(firstLease, now)).isFalse();
+        assertThat(tasks.complete(recoveredLease, now)).isTrue();
+    }
+
+    @Test
+    void recordsAStableErrorWhenTheDownstreamFailureHasNoMessage() {
+        saveFile("file-null-error", "v1", "CA");
+        publications.register(event("publication-null-error"));
+        fanOutWorker.drainAvailablePages();
+        Instant now = clock.instant();
+        long taskId = tasks.findClaimableTaskId(now).orElseThrow();
+        var lease = tasks.claim(taskId, "lease-null-error", now, now.plusSeconds(5)).orElseThrow();
+
+        assertThat(tasks.fail(lease, null, now, true, now)).isTrue();
+        assertThat(tasks.fail(lease, "stale", now, true, now)).isFalse();
+        assertThat(jdbc.sql("SELECT last_error FROM fan_out_task WHERE id = :id")
+                .param("id", taskId)
+                .query(String.class)
+                .single()).isEqualTo("Unknown downstream failure");
+    }
+
+    @Test
+    void completesFanOutWhenNoFilesAreAffected() {
+        publications.register(event("publication-empty"));
+
+        assertThat(fanOutWorker.processOnePage()).isTrue();
+        assertThat(fanOutWorker.processOnePage()).isFalse();
+        assertThat(publications.status("publication-empty").fanOutStatus())
+                .isEqualTo(PublicationStatus.FAN_OUT_COMPLETE);
+        assertThat(publications.status("publication-empty").tasks().total()).isZero();
+    }
+
+    @Test
+    void usesTheClockWhenCatalogMetadataHasNoTimestampAndProtectsPublicationLeases() {
+        files.save(new EngagementFile(
+                "file-clock", "firm-1", "template-a", "v1", "CA", "CANADA", null));
+        assertThat(jdbc.sql("SELECT updated_at FROM engagement_file_catalog WHERE file_id = 'file-clock'")
+                .query(Timestamp.class)
+                .single()).isNotNull();
+
+        publications.register(event("publication-guard"));
+        Instant now = clock.instant();
+        assertThat(publicationRepository.claim(
+                "publication-guard", "owner", now, now.plusSeconds(5))).isTrue();
+        assertThat(publicationRepository.claim(
+                "publication-guard", "other", now, now.plusSeconds(5))).isFalse();
+        assertThatThrownBy(() -> publicationRepository.pageCompleted(
+                "publication-guard", "wrong-owner", null, 0, true, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Publication lease was lost for publication-guard");
+    }
+
+    private boolean noTaskIsProcessing(String publicationId) {
+        return tasks.countsForPublication(publicationId).processing() == 0;
+    }
+
     private void saveFile(String fileId, String version, String market) {
         files.save(new EngagementFile(
                 fileId, "firm-1", "template-a", version, market, "CANADA", clock.instant()));
@@ -183,6 +283,7 @@ class TemplatePublishWorkerIntegrationTest {
         private final ConcurrentHashMap<String, AtomicInteger> attempts = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, Set<String>> idempotencyKeys = new ConcurrentHashMap<>();
         private final Set<String> failFirst = ConcurrentHashMap.newKeySet();
+        private final Set<String> failAlways = ConcurrentHashMap.newKeySet();
         private final AtomicInteger active = new AtomicInteger();
         private final AtomicInteger maximumActive = new AtomicInteger();
         private volatile CountDownLatch gate = new CountDownLatch(0);
@@ -195,7 +296,7 @@ class TemplatePublishWorkerIntegrationTest {
             idempotencyKeys.computeIfAbsent(fileId, ignored -> ConcurrentHashMap.newKeySet()).add(idempotencyKey);
             try {
                 gate.await(3, TimeUnit.SECONDS);
-                if (attempt == 1 && failFirst.contains(fileId)) {
+                if (failAlways.contains(fileId) || (attempt == 1 && failFirst.contains(fileId))) {
                     throw new IllegalStateException("temporary downstream failure");
                 }
             } catch (InterruptedException interrupted) {
@@ -218,6 +319,10 @@ class TemplatePublishWorkerIntegrationTest {
             failFirst.add(fileId);
         }
 
+        void failEveryCallFor(String fileId) {
+            failAlways.add(fileId);
+        }
+
         int activeCalls() {
             return active.get();
         }
@@ -227,7 +332,8 @@ class TemplatePublishWorkerIntegrationTest {
         }
 
         int attemptsFor(String fileId) {
-            return attempts.get(fileId).get();
+            AtomicInteger value = attempts.get(fileId);
+            return value == null ? 0 : value.get();
         }
 
         Set<String> idempotencyKeysFor(String fileId) {
@@ -240,6 +346,7 @@ class TemplatePublishWorkerIntegrationTest {
             attempts.clear();
             idempotencyKeys.clear();
             failFirst.clear();
+            failAlways.clear();
             active.set(0);
             maximumActive.set(0);
         }

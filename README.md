@@ -70,11 +70,14 @@ The bundled downstream adapter logs successful calls immediately. A production a
 
 H2 keeps the exercise self-contained and makes persistence behavior testable. It is not the proposed multi-region production database: it cannot provide shared durable state across a horizontally scaled fleet. The production mapping in the architecture document uses one regional durable store and queue per residency boundary while retaining the same ports and idempotency rules.
 
-The implementation tests pagination, duplicate events, conflicting event ids, bounded concurrency, and retry idempotency:
+The implementation tests the API and validation rules, configuration guards, repository behavior, pagination, duplicate and conflicting events, bounded concurrency, lease recovery, retry idempotency, and dead-letter behavior. JaCoCo enforces 100% line coverage and at least 90% branch coverage:
 
 ```sh
 ./mvnw test
+./mvnw verify
 ```
+
+The HTML coverage report is generated at `target/site/jacoco/index.html`.
 
 ## Git Flow
 
