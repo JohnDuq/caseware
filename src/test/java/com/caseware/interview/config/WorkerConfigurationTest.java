@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,9 +20,11 @@ class WorkerConfigurationTest {
 
         assertThat(configuration.clock().getZone()).isEqualTo(ZoneOffset.UTC);
         ExecutorService executor = configuration.downstreamExecutor(properties);
+        Semaphore capacity = configuration.downstreamCapacity(properties);
         try {
             assertThat(executor.submit(() -> Thread.currentThread().getName()).get())
                     .startsWith("downstream-update-");
+            assertThat(capacity.availablePermits()).isEqualTo(2);
         } finally {
             executor.shutdownNow();
         }

@@ -21,7 +21,7 @@ flowchart LR
 
 The global tier contains no firm data. EU and Canada each run the catalog, task store, queue, API, and workers inside their boundary. Events contain identifiers and version metadata, never audit working papers. The event router sends a firm's events only to its home region.
 
-The H2 application in this repository is the bounded Java implementation of `Fan-out worker`, `Durable per-file tasks`, and the downstream-call contract. H2 is appropriate for a single-process demonstration. A production deployment would use a regional managed relational database such as Aurora PostgreSQL plus SQS, or DynamoDB plus SQS, because workers must share durable state and survive host loss.
+The H2 application in this repository is the bounded Java implementation of `Fan-out worker`, `Durable per-file tasks`, and the downstream-call contract. It uses ports and adapters: framework-independent domain records sit at the center; application services implement input ports and depend only on output ports; REST and scheduler components are inbound adapters; and Spring Data JPA, transaction handling, and downstream calls are outbound adapters. `WorkerConfiguration` is the composition root that wires these parts through constructor injection. H2 is appropriate for a single-process demonstration. A production deployment would use a regional managed relational database such as Aurora PostgreSQL plus SQS, or DynamoDB plus SQS, because workers must share durable state and survive host loss.
 
 ## State model and correctness
 

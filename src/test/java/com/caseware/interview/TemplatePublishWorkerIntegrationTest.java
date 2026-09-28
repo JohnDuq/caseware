@@ -12,21 +12,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
-import com.caseware.interview.api.TemplatePublicationRequest;
-import com.caseware.interview.client.EngagementUpdateClient;
+import com.caseware.interview.adapter.out.persistence.repository.EngagementFileJpaRepository;
+import com.caseware.interview.adapter.out.persistence.repository.FanOutTaskJpaRepository;
+import com.caseware.interview.adapter.out.persistence.repository.PublicationJpaRepository;
+import com.caseware.interview.application.exception.PublicationConflictException;
+import com.caseware.interview.application.port.in.EngagementFileCommand;
+import com.caseware.interview.application.port.in.EngagementFileUseCase;
+import com.caseware.interview.application.port.in.FanOutUseCase;
+import com.caseware.interview.application.port.in.PublicationRegistration;
+import com.caseware.interview.application.port.in.TaskDispatchUseCase;
+import com.caseware.interview.application.port.in.TemplatePublicationCommand;
+import com.caseware.interview.application.port.in.TemplatePublicationUseCase;
+import com.caseware.interview.application.port.out.EngagementUpdatePort;
+import com.caseware.interview.application.port.out.FanOutTaskStorePort;
+import com.caseware.interview.application.port.out.TransactionPort;
 import com.caseware.interview.domain.PublicationStatus;
 import com.caseware.interview.domain.TaskCounts;
 import com.caseware.interview.domain.TaskLease;
 import com.caseware.interview.domain.TaskStatus;
-import com.caseware.interview.repository.EngagementFileRepository;
-import com.caseware.interview.repository.FanOutTaskRepository;
-import com.caseware.interview.repository.PublicationConflictException;
-import com.caseware.interview.repository.PublicationRepository;
-import com.caseware.interview.repository.PublicationRepository.RegistrationResult;
-import com.caseware.interview.repository.entity.EngagementFileEntity;
-import com.caseware.interview.service.DownstreamTaskDispatcher;
-import com.caseware.interview.service.PublicationService;
-import com.caseware.interview.service.TemplatePublishFanOutWorker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,7 +38,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest
 @Import(TemplatePublishWorkerIntegrationTest.FakeClientConfiguration.class)
@@ -43,25 +45,29 @@ class TemplatePublishWorkerIntegrationTest {
 
     private static final Instant PUBLISHED_AT = Instant.parse("2026-09-28T12:00:00Z");
 
-    private final EngagementFileRepository files;
-    private final PublicationService publications;
-    private final TemplatePublishFanOutWorker fanOutWorker;
-    private final DownstreamTaskDispatcher dispatcher;
-    private final FanOutTaskRepository tasks;
-    private final PublicationRepository publicationRepository;
-    private final TransactionTemplate transaction;
+    private final EngagementFileUseCase files;
+    private final TemplatePublicationUseCase publications;
+    private final FanOutUseCase fanOutWorker;
+    private final TaskDispatchUseCase dispatcher;
+    private final FanOutTaskStorePort tasks;
+    private final EngagementFileJpaRepository fileJpaRepository;
+    private final PublicationJpaRepository publicationJpaRepository;
+    private final FanOutTaskJpaRepository taskJpaRepository;
+    private final TransactionPort transaction;
     private final RecordingClient client;
     private final Clock clock;
 
     @Autowired
     TemplatePublishWorkerIntegrationTest(
-            EngagementFileRepository files,
-            PublicationService publications,
-            TemplatePublishFanOutWorker fanOutWorker,
-            DownstreamTaskDispatcher dispatcher,
-            FanOutTaskRepository tasks,
-            PublicationRepository publicationRepository,
-            TransactionTemplate transaction,
+            EngagementFileUseCase files,
+            TemplatePublicationUseCase publications,
+            FanOutUseCase fanOutWorker,
+            TaskDispatchUseCase dispatcher,
+            FanOutTaskStorePort tasks,
+            EngagementFileJpaRepository fileJpaRepository,
+            PublicationJpaRepository publicationJpaRepository,
+            FanOutTaskJpaRepository taskJpaRepository,
+            TransactionPort transaction,
             RecordingClient client,
             Clock clock) {
         this.files = files;
@@ -69,7 +75,9 @@ class TemplatePublishWorkerIntegrationTest {
         this.fanOutWorker = fanOutWorker;
         this.dispatcher = dispatcher;
         this.tasks = tasks;
-        this.publicationRepository = publicationRepository;
+        this.fileJpaRepository = fileJpaRepository;
+        this.publicationJpaRepository = publicationJpaRepository;
+        this.taskJpaRepository = taskJpaRepository;
         this.transaction = transaction;
         this.client = client;
         this.clock = clock;
@@ -77,9 +85,9 @@ class TemplatePublishWorkerIntegrationTest {
 
     @BeforeEach
     void resetState() {
-        tasks.deleteAllInBatch();
-        publicationRepository.deleteAllInBatch();
-        files.deleteAllInBatch();
+        taskJpaRepository.deleteAllInBatch();
+        publicationJpaRepository.deleteAllInBatch();
+        fileJpaRepository.deleteAllInBatch();
         client.reset();
     }
 
@@ -91,9 +99,9 @@ class TemplatePublishWorkerIntegrationTest {
         saveFile("already-current", "v4", "CA");
         saveFile("other-market", "v1", "EU");
 
-        TemplatePublicationRequest event = event("publication-1");
-        assertThat(publications.register(event)).isEqualTo(RegistrationResult.CREATED);
-        assertThat(publications.register(event)).isEqualTo(RegistrationResult.DUPLICATE);
+        TemplatePublicationCommand event = event("publication-1");
+        assertThat(publications.register(event)).isEqualTo(PublicationRegistration.CREATED);
+        assertThat(publications.register(event)).isEqualTo(PublicationRegistration.DUPLICATE);
 
         assertThat(fanOutWorker.drainAvailablePages()).isEqualTo(2);
         assertThat(fanOutWorker.drainAvailablePages()).isZero();
@@ -109,7 +117,7 @@ class TemplatePublishWorkerIntegrationTest {
     void rejectsReuseOfAnIdempotencyKeyForDifferentPayload() {
         publications.register(event("publication-conflict"));
 
-        TemplatePublicationRequest conflicting = new TemplatePublicationRequest(
+        TemplatePublicationCommand conflicting = new TemplatePublicationCommand(
                 "publication-conflict", "template-9", "v99", "EU", PUBLISHED_AT);
 
         assertThatThrownBy(() -> publications.register(conflicting))
@@ -184,13 +192,13 @@ class TemplatePublishWorkerIntegrationTest {
         Instant now = clock.instant();
         TaskLease firstLease = claimNext("lease-1", now);
         long taskId = firstLease.taskId();
-        var persistedTask = tasks.findById(taskId).orElseThrow();
+        var persistedTask = taskJpaRepository.findById(taskId).orElseThrow();
         assertThat(persistedTask.getId()).isEqualTo(taskId);
         assertThat(persistedTask.getStatus()).isEqualTo(TaskStatus.PROCESSING);
         assertThat(persistedTask.getAttemptCount()).isEqualTo(1);
 
         assertThat(findAndClaim("lease-unavailable", now)).isEmpty();
-        assertThat(tasks.updateLeaseExpiry(taskId, now.minusSeconds(1))).isEqualTo(1);
+        assertThat(taskJpaRepository.updateLeaseExpiry(taskId, now.minusSeconds(1))).isEqualTo(1);
 
         TaskLease recoveredLease = claimNext("lease-2", now);
 
@@ -210,7 +218,7 @@ class TemplatePublishWorkerIntegrationTest {
 
         assertThat(tasks.fail(lease, null, now, true, now)).isTrue();
         assertThat(tasks.fail(lease, "stale", now, true, now)).isFalse();
-        assertThat(tasks.findById(taskId).orElseThrow().getLastError())
+        assertThat(taskJpaRepository.findById(taskId).orElseThrow().getLastError())
                 .isEqualTo("Unknown downstream failure");
     }
 
@@ -230,7 +238,7 @@ class TemplatePublishWorkerIntegrationTest {
         saveFile("file-clock", "v1", "CA");
         saveFile("file-clock", "v2", "CA");
 
-        EngagementFileEntity saved = files.findById("file-clock").orElseThrow();
+        var saved = fileJpaRepository.findById("file-clock").orElseThrow();
         assertThat(saved.getTemplateVersion()).isEqualTo("v2");
         assertThat(saved.getUpdatedAt()).isNotNull();
     }
@@ -240,8 +248,8 @@ class TemplatePublishWorkerIntegrationTest {
     }
 
     private void saveFile(String fileId, String version, String market) {
-        files.save(new EngagementFileEntity(
-                fileId, "firm-1", "template-a", version, market, "CANADA", clock.instant()));
+        files.upsert(new EngagementFileCommand(
+                fileId, "firm-1", "template-a", version, market, "CANADA"));
     }
 
     private TaskLease claimNext(String token, Instant now) {
@@ -249,12 +257,11 @@ class TemplatePublishWorkerIntegrationTest {
     }
 
     private java.util.Optional<TaskLease> findAndClaim(String token, Instant now) {
-        return transaction.execute(ignored -> tasks.findNextClaimable(now)
-                .map(task -> task.claim(token, now.plusSeconds(5), now)));
+        return transaction.required(() -> tasks.claimNext(token, now, now.plusSeconds(5)));
     }
 
-    private static TemplatePublicationRequest event(String publicationId) {
-        return new TemplatePublicationRequest(
+    private static TemplatePublicationCommand event(String publicationId) {
+        return new TemplatePublicationCommand(
                 publicationId, "template-a", "v4", "CA", PUBLISHED_AT);
     }
 
@@ -276,7 +283,7 @@ class TemplatePublishWorkerIntegrationTest {
         }
     }
 
-    static class RecordingClient implements EngagementUpdateClient {
+    static class RecordingClient implements EngagementUpdatePort {
 
         private final ConcurrentHashMap<String, AtomicInteger> attempts = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, Set<String>> idempotencyKeys = new ConcurrentHashMap<>();
