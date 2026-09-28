@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+.DS_Store
+data
+docs
+target
+*.log
+*.mv.db
+*.trace.db

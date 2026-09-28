@@ -50,6 +50,27 @@ Inspect the sample publication after startup:
 curl http://localhost:8080/api/v1/template-publications/sample-publication-audit-ca-v7
 ```
 
+## Run with Docker
+
+Build the image:
+
+```sh
+docker build -t caseware-template-worker .
+```
+
+Run the container with a named volume so the H2 database survives container replacement:
+
+```sh
+docker volume create caseware-h2-data
+docker run --rm \
+  --name caseware-template-worker \
+  -p 8080:8080 \
+  -v caseware-h2-data:/app/data \
+  caseware-template-worker
+```
+
+The API, H2 console, health endpoint, sample data, and Postman examples use the same URLs documented for local execution.
+
 ## Try the flow
 
 Create two lightweight Engagement File catalog entries:
