@@ -1,0 +1,358 @@
+{
+  "info": {
+    "_postman_id": "fe1411f4-1c22-4ea8-bd55-c9a598d94e17",
+    "name": "Caseware Template Publish Worker API",
+    "description": "Examples for loading Engagement File metadata, publishing template versions, checking idempotency and conflicts, and inspecting fan-out progress. Start the application before running the collection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "publicationId",
+      "value": "postman-publication-audit-ca-v8",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Application health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Checks that the application and its H2 connection are available."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Health endpoint responds successfully', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Engagement Files",
+      "description": "Creates or updates lightweight catalog metadata. These requests do not store working-paper content.",
+      "item": [
+        {
+          "name": "Upsert affected file 001",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firmId\": \"firm-postman\",\n  \"templateId\": \"audit-ca\",\n  \"templateVersion\": \"v5\",\n  \"market\": \"CA\",\n  \"region\": \"CANADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/engagement-files/postman-file-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "engagement-files", "postman-file-001"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('File metadata is stored', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert affected file 002",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firmId\": \"firm-postman\",\n  \"templateId\": \"audit-ca\",\n  \"templateVersion\": \"v6\",\n  \"market\": \"CA\",\n  \"region\": \"CANADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/engagement-files/postman-file-002",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "engagement-files", "postman-file-002"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('File metadata is stored', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert already-current file",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firmId\": \"firm-postman\",\n  \"templateId\": \"audit-ca\",\n  \"templateVersion\": \"v8\",\n  \"market\": \"CA\",\n  \"region\": \"CANADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/engagement-files/postman-file-current",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "engagement-files", "postman-file-current"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Current file metadata is stored', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Template Publications",
+      "item": [
+        {
+          "name": "Publish template v8",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"publicationId\": \"{{publicationId}}\",\n  \"templateId\": \"audit-ca\",\n  \"targetVersion\": \"v8\",\n  \"market\": \"CA\",\n  \"publishedAt\": \"2026-09-28T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/template-publications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "template-publications"]
+            },
+            "description": "Creates the publication the first time. Re-running the same request is safe and returns DUPLICATE in X-Idempotency-Result."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Publication is accepted', function () {",
+                  "  pm.response.to.have.status(202);",
+                  "  pm.expect(['CREATED', 'DUPLICATE']).to.include(pm.response.headers.get('X-Idempotency-Result'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat identical publication",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"publicationId\": \"{{publicationId}}\",\n  \"templateId\": \"audit-ca\",\n  \"targetVersion\": \"v8\",\n  \"market\": \"CA\",\n  \"publishedAt\": \"2026-09-28T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/template-publications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "template-publications"]
+            },
+            "description": "Demonstrates idempotent redelivery of the same event."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Identical event is detected as a duplicate', function () {",
+                  "  pm.response.to.have.status(202);",
+                  "  pm.expect(pm.response.headers.get('X-Idempotency-Result')).to.eql('DUPLICATE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reuse publication id with conflicting payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"publicationId\": \"{{publicationId}}\",\n  \"templateId\": \"audit-ca\",\n  \"targetVersion\": \"v9\",\n  \"market\": \"CA\",\n  \"publishedAt\": \"2026-09-28T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/template-publications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "template-publications"]
+            },
+            "description": "Shows the conflict response when an idempotency key is reused for a different event."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Conflicting event is rejected', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().status).to.eql(409);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get publication progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/template-publications/{{publicationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "template-publications", "{{publicationId}}"]
+            },
+            "description": "Returns fan-out state and task counts. With scheduling enabled, repeat this request to observe progress."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Publication progress is available', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().publicationId).to.eql(pm.variables.get('publicationId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get built-in sample publication",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/template-publications/sample-publication-audit-ca-v7",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "template-publications", "sample-publication-audit-ca-v7"]
+            },
+            "description": "Reads the idempotent sample publication loaded automatically at application startup."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Built-in sample is available', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
