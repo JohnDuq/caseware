@@ -35,6 +35,7 @@ data/
 # Machine-specific Graphify interpreter paths
 graphify-out/.graphify_python
 graphify-out/.graphify_root
+graphify-out/cache/
 
 # IDE and operating system files
 .idea/
