@@ -38,11 +38,11 @@ public class TemplatePublishFanOutService implements FanOutUseCase {
 
     @Override
     public boolean processOnePage() {
-        Boolean processed = transactions.required(() -> {
+        FanOutResult result = transactions.required(() -> {
             Instant now = clock.instant();
             TemplatePublication publication = publications.findNextClaimable(now).orElse(null);
             if (publication == null) {
-                return false;
+                return FanOutResult.notProcessed();
             }
 
             String leaseToken = UUID.randomUUID().toString();
@@ -64,12 +64,22 @@ public class TemplatePublishFanOutService implements FanOutUseCase {
                     : affectedFiles.get(affectedFiles.size() - 1).fileId();
             publications.completePage(
                     publication.publicationId(), cursor, inserted, complete, now);
-            metrics.counter("caseware.fanout.tasks.created").increment(inserted);
-            if (complete) {
-                metrics.counter("caseware.fanout.publications.completed").increment();
-            }
-            return true;
+            return new FanOutResult(true, inserted, complete);
         });
-        return Boolean.TRUE.equals(processed);
+        if (result == null || !result.processed()) {
+            return false;
+        }
+        metrics.counter("caseware.fanout.tasks.created").increment(result.inserted());
+        if (result.completed()) {
+            metrics.counter("caseware.fanout.publications.completed").increment();
+        }
+        return true;
+    }
+
+    private record FanOutResult(boolean processed, int inserted, boolean completed) {
+
+        private static FanOutResult notProcessed() {
+            return new FanOutResult(false, 0, false);
+        }
     }
 }

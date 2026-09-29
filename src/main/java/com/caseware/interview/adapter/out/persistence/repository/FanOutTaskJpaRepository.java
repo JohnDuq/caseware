@@ -97,6 +97,18 @@ public interface FanOutTaskJpaRepository extends JpaRepository<FanOutTaskJpaEnti
 
     @Modifying(clearAutomatically = true)
     @Transactional
-    @Query("UPDATE FanOutTaskJpaEntity task SET task.leaseExpiresAt = :expiry WHERE task.id = :taskId")
-    int updateLeaseExpiry(@Param("taskId") long taskId, @Param("expiry") Instant expiry);
+    @Query("""
+            UPDATE FanOutTaskJpaEntity task
+            SET task.leaseExpiresAt = :expiry,
+                task.updatedAt = :now
+            WHERE task.id = :taskId
+              AND task.status = :processing
+              AND task.leaseToken = :leaseToken
+            """)
+    int renewLease(
+            @Param("taskId") long taskId,
+            @Param("leaseToken") String leaseToken,
+            @Param("expiry") Instant expiry,
+            @Param("now") Instant now,
+            @Param("processing") TaskStatus processing);
 }

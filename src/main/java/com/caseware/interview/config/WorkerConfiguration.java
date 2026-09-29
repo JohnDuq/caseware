@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ScheduledExecutorService;
 
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
 import com.caseware.interview.application.port.in.FanOutUseCase;
@@ -42,6 +43,12 @@ public class WorkerConfiguration {
         return new Semaphore(properties.maxConcurrency());
     }
 
+    @Bean(destroyMethod = "shutdown")
+    ScheduledExecutorService leaseRenewalExecutor() {
+        return Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().name("lease-renewal-", 0).factory());
+    }
+
     @Bean
     EngagementFileUseCase engagementFileUseCase(
             EngagementFileCatalogPort catalog,
@@ -78,10 +85,11 @@ public class WorkerConfiguration {
             Clock clock,
             TransactionPort transactions,
             ExecutorService downstreamExecutor,
+            ScheduledExecutorService leaseRenewalExecutor,
             Semaphore downstreamCapacity,
             MeterRegistry metrics) {
         return new DownstreamTaskDispatchService(
                 tasks, client, properties, clock, transactions,
-                downstreamExecutor, downstreamCapacity, metrics);
+                downstreamExecutor, leaseRenewalExecutor, downstreamCapacity, metrics);
     }
 }

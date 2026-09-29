@@ -75,6 +75,12 @@ public class JpaFanOutTaskAdapter implements FanOutTaskStorePort {
     }
 
     @Override
+    public boolean renewLease(TaskLease lease, Instant now, Instant leaseExpiry) {
+        return tasks.renewLease(
+                lease.taskId(), lease.leaseToken(), leaseExpiry, now, TaskStatus.PROCESSING) == 1;
+    }
+
+    @Override
     public boolean fail(TaskLease lease, String error, Instant retryAt, boolean terminal, Instant now) {
         String safeError = error == null
                 ? "Unknown downstream failure"

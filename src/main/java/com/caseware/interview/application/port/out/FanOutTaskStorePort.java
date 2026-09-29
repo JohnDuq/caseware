@@ -17,6 +17,8 @@ public interface FanOutTaskStorePort {
 
     Optional<TaskLease> claimNext(String leaseToken, Instant now, Instant leaseExpiry);
 
+    boolean renewLease(TaskLease lease, Instant now, Instant leaseExpiry);
+
     boolean complete(TaskLease lease, Instant now);
 
     boolean fail(TaskLease lease, String error, Instant retryAt, boolean terminal, Instant now);

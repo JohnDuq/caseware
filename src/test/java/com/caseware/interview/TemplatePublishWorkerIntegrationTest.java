@@ -5,17 +5,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import com.caseware.interview.adapter.out.persistence.repository.EngagementFileJpaRepository;
 import com.caseware.interview.adapter.out.persistence.repository.FanOutTaskJpaRepository;
 import com.caseware.interview.adapter.out.persistence.repository.PublicationJpaRepository;
 import com.caseware.interview.application.exception.PublicationConflictException;
+import com.caseware.interview.application.exception.DownstreamUpdateException;
 import com.caseware.interview.application.port.in.command.EngagementFileCommand;
 import com.caseware.interview.application.port.in.EngagementFileUseCase;
 import com.caseware.interview.application.port.in.FanOutUseCase;
@@ -89,6 +93,7 @@ class TemplatePublishWorkerIntegrationTest {
         publicationJpaRepository.deleteAllInBatch();
         fileJpaRepository.deleteAllInBatch();
         client.reset();
+        ((MutableClock) clock).set(PUBLISHED_AT);
     }
 
     @Test
@@ -153,13 +158,13 @@ class TemplatePublishWorkerIntegrationTest {
 
         assertThat(dispatcher.dispatchAvailable()).isEqualTo(1);
         await(() -> tasks.countsForPublication("publication-retry").retrying() == 1);
-        Thread.sleep(5);
+        ((MutableClock) clock).advanceMillis(1);
         assertThat(dispatcher.dispatchAvailable()).isEqualTo(1);
         await(() -> tasks.countsForPublication("publication-retry").succeeded() == 1);
 
         assertThat(client.attemptsFor("file-retry")).isEqualTo(2);
         assertThat(client.idempotencyKeysFor("file-retry"))
-                .containsExactly("publication-retry:file-retry");
+                .containsExactly("v1.cHVibGljYXRpb24tcmV0cnk.ZmlsZS1yZXRyeQ");
         TaskCounts counts = tasks.countsForPublication("publication-retry");
         assertThat(counts.deadLetter()).isZero();
     }
@@ -176,7 +181,7 @@ class TemplatePublishWorkerIntegrationTest {
             int expectedAttempts = attempt;
             await(() -> client.attemptsFor("file-dead") == expectedAttempts
                     && noTaskIsProcessing("publication-dead"));
-            Thread.sleep(10);
+            ((MutableClock) clock).advanceMillis(1L << Math.min(attempt - 1, 20));
         }
 
         TaskCounts counts = tasks.countsForPublication("publication-dead");
@@ -198,7 +203,7 @@ class TemplatePublishWorkerIntegrationTest {
         assertThat(persistedTask.getAttemptCount()).isEqualTo(1);
 
         assertThat(findAndClaim("lease-unavailable", now)).isEmpty();
-        assertThat(taskJpaRepository.updateLeaseExpiry(taskId, now.minusSeconds(1))).isEqualTo(1);
+        assertThat(tasks.renewLease(firstLease, now, now.minusSeconds(1))).isTrue();
 
         TaskLease recoveredLease = claimNext("lease-2", now);
 
@@ -281,6 +286,12 @@ class TemplatePublishWorkerIntegrationTest {
         RecordingClient recordingClient() {
             return new RecordingClient();
         }
+
+        @Bean
+        @Primary
+        Clock testClock() {
+            return new MutableClock(PUBLISHED_AT);
+        }
     }
 
     static class RecordingClient implements EngagementUpdatePort {
@@ -302,11 +313,11 @@ class TemplatePublishWorkerIntegrationTest {
             try {
                 gate.await(3, TimeUnit.SECONDS);
                 if (failAlways.contains(fileId) || (attempt == 1 && failFirst.contains(fileId))) {
-                    throw new IllegalStateException("temporary downstream failure");
+                    throw new DownstreamUpdateException("temporary downstream failure", true);
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("interrupted", interrupted);
+                throw new DownstreamUpdateException("interrupted", interrupted, true);
             } finally {
                 active.decrementAndGet();
             }
@@ -354,6 +365,41 @@ class TemplatePublishWorkerIntegrationTest {
             failAlways.clear();
             active.set(0);
             maximumActive.set(0);
+        }
+    }
+
+    static class MutableClock extends Clock {
+
+        private final AtomicReference<Instant> current;
+
+        MutableClock(Instant initial) {
+            current = new AtomicReference<>(initial);
+        }
+
+        void set(Instant instant) {
+            current.set(instant);
+        }
+
+        void advanceMillis(long milliseconds) {
+            current.updateAndGet(value -> value.plusMillis(milliseconds));
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            if (!ZoneOffset.UTC.equals(zone)) {
+                throw new IllegalArgumentException("Only UTC is supported");
+            }
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return current.get();
         }
     }
 }

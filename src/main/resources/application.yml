@@ -1,17 +1,9 @@
 spring:
   application:
     name: template-publish-worker
-  datasource:
-    url: jdbc:h2:file:./data/caseware;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password:
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+  profiles:
+    default: local
   jpa:
-    hibernate:
-      ddl-auto: update
     open-in-view: false
 
 management:
@@ -23,10 +15,6 @@ management:
     health:
       probes:
         enabled: true
-
-application:
-  sample-data:
-    enabled: true
 
 worker:
   scheduling-enabled: true

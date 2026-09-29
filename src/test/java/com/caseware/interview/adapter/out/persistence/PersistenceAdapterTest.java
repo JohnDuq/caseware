@@ -162,7 +162,7 @@ class PersistenceAdapterTest {
         TaskLease lease = adapter.claimNext("lease", NOW, NOW.plusSeconds(5)).orElseThrow();
 
         assertThat(lease.taskId()).isEqualTo(7L);
-        assertThat(lease.idempotencyKey()).isEqualTo("publication-1:file-1");
+        assertThat(lease.idempotencyKey()).isEqualTo("v1.cHVibGljYXRpb24tMQ.ZmlsZS0x");
         assertThat(claimable.getStatus()).isEqualTo(TaskStatus.PROCESSING);
     }
 
@@ -188,6 +188,8 @@ class PersistenceAdapterTest {
         TaskLease lease = new TaskLease(7L, "publication-1", "file-1", "v4", "lease", 2);
         when(tasks.completeLease(7L, "lease", NOW, TaskStatus.PROCESSING, TaskStatus.SUCCEEDED))
                 .thenReturn(1);
+        when(tasks.renewLease(7L, "lease", NOW.plusSeconds(5), NOW, TaskStatus.PROCESSING))
+                .thenReturn(1);
         when(tasks.failLease(eq(7L), eq("lease"), any(), eq(NOW),
                 eq(TaskStatus.DEAD_LETTER), eq(TaskStatus.PROCESSING), eq(NOW))).thenReturn(1);
         TaskStatusCountProjection pending = count(TaskStatus.PENDING, 2L);
@@ -195,6 +197,7 @@ class PersistenceAdapterTest {
         when(tasks.countByStatus("publication-1")).thenReturn(List.of(pending, retry));
 
         assertThat(adapter.complete(lease, NOW)).isTrue();
+        assertThat(adapter.renewLease(lease, NOW, NOW.plusSeconds(5))).isTrue();
         assertThat(adapter.fail(lease, null, NOW, true, NOW)).isTrue();
         assertThat(adapter.countsForPublication("publication-1").pending()).isEqualTo(2);
         assertThat(adapter.countsForPublication("publication-1").retrying()).isEqualTo(3);

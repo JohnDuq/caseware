@@ -2,7 +2,7 @@
 
 Bounded Java implementation for the Caseware Staff Java Developer take-home exercise. The service accepts Product Template publication events, discovers affected Engagement Files from a lightweight catalog, creates durable work items, and invokes a capacity-constrained downstream service.
 
-The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Data JPA with Hibernate, and H2. H2 runs as a file database for local execution and as an in-memory database in tests.
+The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Data JPA with Hibernate, Flyway, and H2. H2 runs as a file database for local execution and as an in-memory database in tests.
 
 ## Design goals
 
@@ -12,7 +12,7 @@ The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Da
 - A configurable semaphore caps concurrent one-minute downstream calls.
 - Failed calls use exponential backoff and move to `DEAD_LETTER` after the configured attempt limit.
 - Expiring leases recover tasks and fan-out pages left in progress after a worker crash.
-- Every downstream retry carries the same `<publicationId>:<fileId>` idempotency key.
+- Every downstream retry carries the same unambiguous, versioned idempotency key derived from `publicationId` and `fileId`.
 - The catalog contains metadata only; no confidential working-paper content is copied into this service.
 
 ## Project documents
@@ -61,11 +61,13 @@ Requirements: Java 21 or newer. The Maven wrapper downloads Maven 3.9.12 on firs
 ./mvnw spring-boot:run
 ```
 
-The API starts on `http://localhost:8080`. H2 persists under `./data`, and its development console is available at `http://localhost:8080/h2-console` with JDBC URL `jdbc:h2:file:./data/caseware`, user `sa`, and an empty password.
+The API starts on `http://localhost:8080`. The default `local` profile keeps H2 under `./data`, and its development console is available at `http://localhost:8080/h2-console` with JDBC URL `jdbc:h2:file:./data/caseware`, user `sa`, and an empty password. The Docker image also selects this profile so the examples work unchanged.
 
 Health and metrics are exposed through `/actuator/health` and `/actuator/metrics`. Worker settings are under `worker` in `src/main/resources/application.yml`.
 
 On startup, the application loads an idempotent sample dataset into H2: five Engagement Files and the `sample-publication-audit-ca-v7` publication. Three files are eligible for the update, one is already on `v7`, and one belongs to another market. Disable this behavior with `application.sample-data.enabled=false`.
+
+Flyway creates and versions the database schema, while Hibernate only validates the entity mapping. For a managed environment, select the `production` profile and provide `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. That profile disables the H2 console and sample data.
 
 Inspect the sample publication after startup:
 
@@ -124,7 +126,7 @@ Inspect progress:
 curl http://localhost:8080/api/v1/template-publications/pub-audit-ca-v7
 ```
 
-The bundled downstream adapter logs successful calls immediately. A production adapter would apply a network timeout shorter than the task lease and send the provided idempotency key to the owning service.
+The bundled downstream adapter logs successful calls immediately. While a call is active, the worker renews its lease with an ownership token. A production adapter would also apply a network timeout and send the provided idempotency key to the owning service.
 
 ## Main implementation choices and trade-offs
 
@@ -146,9 +148,9 @@ Dependencies point inward. Controllers and schedulers invoke input ports; applic
 
 `TemplatePublishFanOutService` claims one publication page in a database transaction. It inserts missing tasks and advances the scan cursor atomically. A crash before commit repeats the page safely; a crash after commit resumes from the next cursor.
 
-The persistence layer consists of three Spring Data `JpaRepository` interfaces marked with `@Repository`. JPQL queries select eligible files and acquire pessimistic locks when claiming publications or tasks. Hibernate manages schema creation for this self-contained exercise.
+The persistence layer consists of three Spring Data `JpaRepository` interfaces marked with `@Repository`. JPQL queries select eligible files and acquire pessimistic locks when claiming publications or tasks. Flyway owns schema creation and upgrades; Hibernate validates that the JPA mappings match the migrated schema.
 
-`DownstreamTaskDispatchService` claims durable tasks and submits only as many calls as its semaphore allows. The limit is local to an application instance. In production, instance count multiplied by `worker.max-concurrency` must remain below the downstream team's agreed global capacity; a shared rate limiter or queue concurrency setting should enforce that global contract.
+`DownstreamTaskDispatchService` claims durable tasks and submits only as many calls as its semaphore allows. It renews each active lease with an ownership token and distinguishes expected downstream failures from unexpected programming or infrastructure errors. The limit is local to an application instance. In production, instance count multiplied by `worker.max-concurrency` must remain below the downstream team's agreed global capacity; a shared rate limiter or queue concurrency setting should enforce that global contract.
 
 H2 keeps the exercise self-contained and makes persistence behavior testable. It is not the proposed multi-region production database: it cannot provide shared durable state across a horizontally scaled fleet. The production mapping in the architecture document uses one regional durable store and queue per residency boundary while retaining the same ports and idempotency rules.
 

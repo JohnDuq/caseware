@@ -22,6 +22,8 @@ COPY --from=build --chown=caseware:caseware /workspace/target/interview-*.jar /a
 
 USER caseware
 
+ENV SPRING_PROFILES_ACTIVE=local
+
 EXPOSE 8080
 VOLUME ["/app/data"]
 

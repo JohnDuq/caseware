@@ -1,7 +1,5 @@
 package com.caseware.interview.adapter.in.web;
 
-import java.net.URI;
-
 import com.caseware.interview.adapter.in.web.data.request.TemplatePublicationRequest;
 import com.caseware.interview.adapter.in.web.data.response.PublicationStatusResponse;
 import com.caseware.interview.application.port.in.command.TemplatePublicationCommand;
@@ -15,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @RestController
 @RequestMapping("/api/v1/template-publications")
@@ -31,7 +30,11 @@ public class TemplatePublicationController {
                 request.targetVersion(),
                 request.market(),
                 request.publishedAt()));
-        URI location = URI.create("/api/v1/template-publications/" + request.publicationId());
+        var location = UriComponentsBuilder.fromPath("/api/v1/template-publications")
+                .pathSegment(request.publicationId())
+                .build()
+                .encode()
+                .toUri();
         return ResponseEntity.accepted()
                 .location(location)
                 .header("X-Idempotency-Result", result.name())

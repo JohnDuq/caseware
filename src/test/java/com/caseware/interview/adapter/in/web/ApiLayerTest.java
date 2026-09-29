@@ -1,10 +1,13 @@
 package com.caseware.interview.adapter.in.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.Set;
 
 import com.caseware.interview.adapter.in.web.data.request.EngagementFileRequest;
@@ -90,21 +93,31 @@ class ApiLayerTest {
 
     @Test
     void exceptionHandlerMapsConflictAndNotFoundResponses() {
-        ApiExceptionHandler handler = new ApiExceptionHandler();
+        ApiExceptionHandler handler = new ApiExceptionHandler(Clock.fixed(NOW, ZoneOffset.UTC));
 
         var conflict = handler.conflict(new PublicationConflictException("publication-1"));
         var missing = handler.notFound(new PublicationNotFoundException("missing"));
 
         assertThat(conflict.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(conflict.getBody())
-                .containsEntry("status", 409)
-                .containsEntry("error", "Publication id already exists with a different payload: publication-1")
-                .containsKey("timestamp");
+        assertThat(conflict.getBody().status()).isEqualTo(409);
+        assertThat(conflict.getBody().error())
+                .isEqualTo("Publication id already exists with a different payload: publication-1");
+        assertThat(conflict.getBody().timestamp()).isEqualTo(NOW);
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(missing.getBody())
-                .containsEntry("status", 404)
-                .containsEntry("error", "Publication not found: missing")
-                .containsKey("timestamp");
+        assertThat(missing.getBody().status()).isEqualTo(404);
+        assertThat(missing.getBody().error()).isEqualTo("Publication not found: missing");
+    }
+
+    @Test
+    void publicationControllerEncodesTheLocationPathSegment() {
+        TemplatePublicationController controller = new TemplatePublicationController(publications);
+        TemplatePublicationRequest request = new TemplatePublicationRequest(
+                "publication/with?reserved", "template-a", "v4", "CA", NOW);
+        when(publications.register(any(TemplatePublicationCommand.class)))
+                .thenReturn(PublicationRegistration.CREATED);
+
+        assertThat(controller.publish(request).getHeaders().getLocation().toString())
+                .isEqualTo("/api/v1/template-publications/publication%2Fwith%3Freserved");
     }
 
     @Test

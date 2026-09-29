@@ -3,6 +3,10 @@ package com.caseware.interview.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,12 +19,18 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import com.caseware.interview.adapter.in.scheduler.DownstreamTaskScheduler;
 import com.caseware.interview.adapter.in.scheduler.TemplatePublishScheduler;
 import com.caseware.interview.adapter.out.downstream.LoggingEngagementUpdateAdapter;
+import com.caseware.interview.application.exception.DownstreamUpdateException;
 import com.caseware.interview.application.exception.PublicationConflictException;
 import com.caseware.interview.application.exception.PublicationNotFoundException;
 import com.caseware.interview.application.port.in.command.EngagementFileCommand;
@@ -38,6 +48,7 @@ import com.caseware.interview.config.WorkerProperties;
 import com.caseware.interview.domain.EngagementFile;
 import com.caseware.interview.domain.PublicationStatus;
 import com.caseware.interview.domain.TaskCounts;
+import com.caseware.interview.domain.TaskLease;
 import com.caseware.interview.domain.TemplatePublication;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -58,6 +69,27 @@ class ApplicationServiceTest {
 
         verify(catalog).save(new EngagementFile(
                 "file-1", "firm-1", "template-a", "v3", "CA", "CANADA", NOW));
+    }
+
+    @Test
+    void applicationCommandsAndDomainObjectsEnforceTheirInvariants() {
+        assertThatThrownBy(() -> new EngagementFileCommand(
+                " ", "firm", "template", "v1", "CA", "CANADA"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fileId");
+        assertThatThrownBy(() -> new TemplatePublicationCommand(
+                "publication", "template", "v1", "CA", null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("publishedAt is required");
+        assertThatThrownBy(() -> new TemplatePublication(
+                "publication", "template", "v1", "CA", NOW,
+                PublicationStatus.PENDING, null, -1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("totalTasks must not be negative");
+
+        TaskLease first = new TaskLease(1, "a:b", "c", "v1", "lease", 1);
+        TaskLease second = new TaskLease(2, "a", "b:c", "v1", "lease", 1);
+        assertThat(first.idempotencyKey()).isNotEqualTo(second.idempotencyKey());
     }
 
     @Test
@@ -164,6 +196,34 @@ class ApplicationServiceTest {
     }
 
     @Test
+    void fanOutPublishesMetricsOnlyAfterTheTransactionCommits() {
+        PublicationStorePort publications = mock(PublicationStorePort.class);
+        EngagementFileCatalogPort files = mock(EngagementFileCatalogPort.class);
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        TemplatePublication publication = publication("publication-1", PublicationStatus.PENDING, null, 0);
+        when(publications.findNextClaimable(NOW)).thenReturn(Optional.of(publication));
+        when(files.findAffected("template-a", "CA", "v4", null, 2))
+                .thenReturn(List.of(file("file-1")));
+        when(tasks.createPendingTasks(any(), any(), eq(NOW))).thenReturn(1);
+        var metrics = new SimpleMeterRegistry();
+        TransactionPort failedCommit = new TransactionPort() {
+            @Override
+            public <T> T required(Supplier<T> work) {
+                work.get();
+                throw new IllegalStateException("commit failed");
+            }
+        };
+        TemplatePublishFanOutService service = new TemplatePublishFanOutService(
+                publications, files, tasks, properties(true), CLOCK, failedCommit, metrics);
+
+        assertThatThrownBy(service::processOnePage)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("commit failed");
+        assertThat(metrics.find("caseware.fanout.tasks.created").counter()).isNull();
+        assertThat(metrics.find("caseware.fanout.publications.completed").counter()).isNull();
+    }
+
+    @Test
     void schedulersHonorTheConfigurationFlag() {
         FanOutUseCase fanOut = mock(FanOutUseCase.class);
         TaskDispatchUseCase dispatcher = mock(TaskDispatchUseCase.class);
@@ -184,6 +244,7 @@ class ApplicationServiceTest {
         DownstreamTaskDispatchService service = new DownstreamTaskDispatchService(
                 mock(FanOutTaskStorePort.class), mock(EngagementUpdatePort.class),
                 properties(true), CLOCK, nullTransactions(), executor,
+                mock(ScheduledExecutorService.class),
                 new Semaphore(2), new SimpleMeterRegistry());
 
         assertThat(service.dispatchAvailable()).isZero();
@@ -191,9 +252,142 @@ class ApplicationServiceTest {
     }
 
     @Test
+    void downstreamDispatcherCompletesWorkAndRenewsOnlyTheOwnedLease() {
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        EngagementUpdatePort client = mock(EngagementUpdatePort.class);
+        ExecutorService executor = directExecutor();
+        ScheduledExecutorService renewals = mock(ScheduledExecutorService.class);
+        ScheduledFuture<?> renewal = mock(ScheduledFuture.class);
+        ArgumentCaptor<Runnable> heartbeat = ArgumentCaptor.forClass(Runnable.class);
+        TaskLease lease = lease(1);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease), Optional.empty());
+        when(tasks.complete(lease, NOW)).thenReturn(true);
+        when(renewals.scheduleAtFixedRate(
+                heartbeat.capture(), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS)))
+                .thenAnswer(ignored -> renewal);
+        when(tasks.renewLease(lease, NOW, NOW.plusSeconds(5)))
+                .thenReturn(true, false)
+                .thenThrow(new IllegalStateException("database unavailable"));
+        Semaphore capacity = new Semaphore(2);
+        var metrics = new SimpleMeterRegistry();
+        DownstreamTaskDispatchService service = new DownstreamTaskDispatchService(
+                tasks, client, properties(true), CLOCK, immediateTransactions(), executor,
+                renewals, capacity, metrics);
+
+        assertThat(service.dispatchAvailable()).isEqualTo(1);
+        heartbeat.getValue().run();
+        heartbeat.getValue().run();
+        heartbeat.getValue().run();
+
+        verify(client).evaluatePendingUpdate(
+                "file-1", "v4", "v1.cHVibGljYXRpb24tMQ.ZmlsZS0x");
+        verify(renewal).cancel(false);
+        assertThat(capacity.availablePermits()).isEqualTo(2);
+        assertThat(metrics.counter("caseware.downstream.tasks.succeeded").count()).isEqualTo(1);
+    }
+
+    @Test
+    void downstreamDispatcherClassifiesRetryableAndPermanentFailures() {
+        assertDownstreamFailure(new DownstreamUpdateException("temporary", true), lease(1), false);
+        assertDownstreamFailure(new DownstreamUpdateException("permanent", false), lease(1), true);
+        assertDownstreamFailure(new DownstreamUpdateException("exhausted", true), lease(3), true);
+        DownstreamUpdateException caused = new DownstreamUpdateException(
+                "wrapped", new IllegalStateException("cause"), true);
+        assertThat(caused.getCause()).hasMessage("cause");
+        assertThat(caused.isRetryable()).isTrue();
+    }
+
+    @Test
+    void downstreamDispatcherReleasesCapacityAndWorkWhenSubmissionIsRejected() {
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        ExecutorService executor = mock(ExecutorService.class);
+        TaskLease lease = lease(1);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease));
+        when(executor.submit(any(Runnable.class)))
+                .thenThrow(new RejectedExecutionException("executor stopped"));
+        Semaphore capacity = new Semaphore(1);
+        DownstreamTaskDispatchService service = new DownstreamTaskDispatchService(
+                tasks, mock(EngagementUpdatePort.class), properties(true), CLOCK,
+                immediateTransactions(), executor, mock(ScheduledExecutorService.class),
+                capacity, new SimpleMeterRegistry());
+
+        assertThat(service.dispatchAvailable()).isZero();
+        verify(tasks).fail(lease, "executor stopped", NOW, false, NOW);
+        assertThat(capacity.availablePermits()).isEqualTo(1);
+
+        doThrow(new IllegalStateException("database unavailable"))
+                .when(tasks).fail(lease, "executor stopped", NOW, false, NOW);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease));
+        assertThat(service.dispatchAvailable()).isZero();
+        assertThat(capacity.availablePermits()).isEqualTo(1);
+    }
+
+    @Test
+    void downstreamDispatcherReleasesCapacityWhenClaimingOrStartingRenewalFails() {
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        Semaphore claimCapacity = new Semaphore(1);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenThrow(new IllegalStateException("claim failed"));
+        DownstreamTaskDispatchService claimFailure = new DownstreamTaskDispatchService(
+                tasks, mock(EngagementUpdatePort.class), properties(true), CLOCK,
+                immediateTransactions(), mock(ExecutorService.class), scheduledExecutor(),
+                claimCapacity, new SimpleMeterRegistry());
+
+        assertThatThrownBy(claimFailure::dispatchAvailable)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("claim failed");
+        assertThat(claimCapacity.availablePermits()).isEqualTo(1);
+
+        TaskLease lease = lease(1);
+        FanOutTaskStorePort renewalTasks = mock(FanOutTaskStorePort.class);
+        when(renewalTasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease));
+        ScheduledExecutorService rejectedRenewal = mock(ScheduledExecutorService.class);
+        when(rejectedRenewal.scheduleAtFixedRate(
+                any(Runnable.class), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS)))
+                .thenThrow(new RejectedExecutionException("renewal stopped"));
+        ExecutorService queuedExecutor = mock(ExecutorService.class);
+        ArgumentCaptor<Runnable> queuedTask = ArgumentCaptor.forClass(Runnable.class);
+        when(queuedExecutor.submit(queuedTask.capture())).thenReturn(mock(Future.class));
+        Semaphore renewalCapacity = new Semaphore(1);
+        DownstreamTaskDispatchService renewalFailure = new DownstreamTaskDispatchService(
+                renewalTasks, mock(EngagementUpdatePort.class), properties(true), CLOCK,
+                immediateTransactions(), queuedExecutor, rejectedRenewal,
+                renewalCapacity, new SimpleMeterRegistry());
+
+        assertThat(renewalFailure.dispatchAvailable()).isEqualTo(1);
+        assertThatThrownBy(() -> queuedTask.getValue().run())
+                .isInstanceOf(RejectedExecutionException.class)
+                .hasMessage("renewal stopped");
+        assertThat(renewalCapacity.availablePermits()).isEqualTo(1);
+    }
+
+    @Test
+    void downstreamDispatcherDoesNotMisclassifyProgrammingErrorsAsDownstreamFailures() {
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        EngagementUpdatePort client = mock(EngagementUpdatePort.class);
+        TaskLease lease = lease(1);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease));
+        doThrow(new IllegalStateException("bug"))
+                .when(client).evaluatePendingUpdate(any(), any(), any());
+        DownstreamTaskDispatchService service = new DownstreamTaskDispatchService(
+                tasks, client, properties(true), CLOCK, immediateTransactions(), directExecutor(),
+                scheduledExecutor(), new Semaphore(1), new SimpleMeterRegistry());
+
+        assertThatThrownBy(service::dispatchAvailable)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("bug");
+        verify(tasks, never()).fail(any(), any(), any(), eq(false), any());
+    }
+
+    @Test
     void loggingAdapterImplementsTheDownstreamPort() {
         new LoggingEngagementUpdateAdapter()
-                .evaluatePendingUpdate("file-1", "v4", "publication-1:file-1");
+                .evaluatePendingUpdate("file-1", "v4", "v1.cHVibGljYXRpb24tMQ.ZmlsZS0x");
     }
 
     private static TransactionPort immediateTransactions() {
@@ -212,6 +406,48 @@ class ApplicationServiceTest {
                 return null;
             }
         };
+    }
+
+    private static void assertDownstreamFailure(
+            DownstreamUpdateException failure, TaskLease lease, boolean terminal) {
+        FanOutTaskStorePort tasks = mock(FanOutTaskStorePort.class);
+        EngagementUpdatePort client = mock(EngagementUpdatePort.class);
+        when(tasks.claimNext(any(), eq(NOW), eq(NOW.plusSeconds(5))))
+                .thenReturn(Optional.of(lease), Optional.empty());
+        when(tasks.fail(eq(lease), eq(failure.getMessage()), any(), eq(terminal), eq(NOW)))
+                .thenReturn(true);
+        doThrow(failure).when(client).evaluatePendingUpdate(any(), any(), any());
+        var metrics = new SimpleMeterRegistry();
+        DownstreamTaskDispatchService service = new DownstreamTaskDispatchService(
+                tasks, client, properties(true), CLOCK, immediateTransactions(), directExecutor(),
+                scheduledExecutor(), new Semaphore(1), metrics);
+
+        assertThat(service.dispatchAvailable()).isEqualTo(1);
+        String counter = terminal
+                ? "caseware.downstream.tasks.dead_letter"
+                : "caseware.downstream.tasks.retry";
+        assertThat(metrics.counter(counter).count()).isEqualTo(1);
+    }
+
+    private static ExecutorService directExecutor() {
+        ExecutorService executor = mock(ExecutorService.class);
+        when(executor.submit(any(Runnable.class))).thenAnswer(invocation -> {
+            invocation.<Runnable>getArgument(0).run();
+            return mock(Future.class);
+        });
+        return executor;
+    }
+
+    private static ScheduledExecutorService scheduledExecutor() {
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        when(executor.scheduleAtFixedRate(
+                any(Runnable.class), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS)))
+                .thenReturn(mock(ScheduledFuture.class));
+        return executor;
+    }
+
+    private static TaskLease lease(int attempt) {
+        return new TaskLease(7L, "publication-1", "file-1", "v4", "lease", attempt);
     }
 
     private static WorkerProperties properties(boolean schedulingEnabled) {

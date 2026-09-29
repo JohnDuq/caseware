@@ -1,6 +1,7 @@
 package com.caseware.interview.config;
 
 import java.time.Duration;
+import java.util.Objects;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -16,6 +17,9 @@ public record WorkerProperties(
         boolean schedulingEnabled) {
 
     public WorkerProperties {
+        pollDelay = Objects.requireNonNull(pollDelay, "pollDelay is required");
+        leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration is required");
+        retryInitialDelay = Objects.requireNonNull(retryInitialDelay, "retryInitialDelay is required");
         if (fanOutPageSize < 1 || maxFanOutPagesPerRun < 1 || maxConcurrency < 1 || maxAttempts < 1) {
             throw new IllegalArgumentException("Worker limits must be positive");
         }
