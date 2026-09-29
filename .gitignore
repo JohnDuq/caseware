@@ -32,6 +32,10 @@ data/
 *.mv.db
 *.trace.db
 
+# Machine-specific Graphify interpreter paths
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+
 # IDE and operating system files
 .idea/
 .vscode/

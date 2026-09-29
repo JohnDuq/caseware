@@ -26,6 +26,9 @@ The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Da
 - [Publication and fan-out sequence](docs/diagrams/publication-fanout-sequence.html)
 - [Downstream dispatch, capacity, and retries](docs/diagrams/downstream-dispatch-workflow.html)
 - [Fan-out task lifecycle](docs/diagrams/task-lifecycle.html)
+- [Interactive project knowledge graph](graphify-out/graph.html)
+- [Knowledge graph report](graphify-out/GRAPH_REPORT.md)
+- [GraphRAG-ready graph data](graphify-out/graph.json)
 
 The architecture documents cover scale calculations, production evolution, data residency, and the human-readable summary strategy. Import the Postman collection to run the complete API example flow against `http://localhost:8080`.
 
