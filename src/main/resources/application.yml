@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: template-publish-worker
+  profiles:
+    default: local
+  jpa:
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+worker:
+  scheduling-enabled: true
+  fan-out-page-size: 500
+  max-fan-out-pages-per-run: 100
+  max-concurrency: 8
+  poll-delay: 250ms
+  lease-duration: 2m
+  max-attempts: 5
+  retry-initial-delay: 5s

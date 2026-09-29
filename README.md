@@ -1,63 +1,170 @@
-# caseware
+# Caseware Template Publish Worker
 
-CaseWare Interview Test.
+Bounded Java implementation for the Caseware Staff Java Developer take-home exercise. The service accepts Product Template publication events, discovers affected Engagement Files from a lightweight catalog, creates durable work items, and invokes a capacity-constrained downstream service.
+
+The local implementation uses Java 21, Spring Boot 4.1, Maven, Lombok, Spring Data JPA with Hibernate, Flyway, and H2. H2 runs as a file database for local execution and as an in-memory database in tests.
+
+## Design goals
+
+- At-least-once event delivery is safe. `publicationId` is the event idempotency key, and `(publicationId, fileId)` is unique for generated work.
+- Fan-out is paginated with keyset pagination, so a publication does not load all affected files into memory.
+- Work is durable before the downstream call starts.
+- A configurable semaphore caps concurrent one-minute downstream calls.
+- Failed calls use exponential backoff and move to `DEAD_LETTER` after the configured attempt limit.
+- Expiring leases recover tasks and fan-out pages left in progress after a worker crash.
+- Every downstream retry carries the same unambiguous, versioned idempotency key derived from `publicationId` and `fileId`.
+- The catalog contains metadata only; no confidential working-paper content is copied into this service.
+
+## Project documents
+
+- [Architecture solution (PDF)](docs/JHONNATAN_DUQUE_RAMOS_Architecture_Solution.pdf)
+- [Architecture design (Markdown)](docs/architecture.md)
+- [Original take-home test](docs/Staff_Java_Developer_-_Take-Home_Test.pdf)
+- [Postman API collection](docs/caseware-api.postman_collection.json)
+- [Interactive diagram index](docs/diagrams/README.md)
+- [Ports and adapters architecture](docs/diagrams/hexagonal-architecture.html)
+- [Publication and fan-out sequence](docs/diagrams/publication-fanout-sequence.html)
+- [Downstream dispatch, capacity, and retries](docs/diagrams/downstream-dispatch-workflow.html)
+- [Fan-out task lifecycle](docs/diagrams/task-lifecycle.html)
+- [Interactive project knowledge graph](graphify-out/graph.html)
+- [Knowledge graph report](graphify-out/GRAPH_REPORT.md)
+- [GraphRAG-ready graph data](graphify-out/graph.json)
+
+The architecture documents cover scale calculations, production evolution, data residency, and the human-readable summary strategy. Import the Postman collection to run the complete API example flow against `http://localhost:8080`.
+
+## Architecture diagrams
+
+Each PNG below links to its interactive HTML version, which supports light and dark themes and additional export formats.
+
+### Ports and adapters architecture
+
+[![Ports and adapters architecture](docs/diagrams/hexagonal-architecture.png)](docs/diagrams/hexagonal-architecture.html)
+
+### Publication and fan-out sequence
+
+[![Publication and fan-out sequence](docs/diagrams/publication-fanout-sequence.png)](docs/diagrams/publication-fanout-sequence.html)
+
+### Downstream dispatch, capacity, and retries
+
+[![Downstream dispatch, capacity, and retries](docs/diagrams/downstream-dispatch-workflow.png)](docs/diagrams/downstream-dispatch-workflow.html)
+
+### Fan-out task lifecycle
+
+[![Fan-out task lifecycle](docs/diagrams/task-lifecycle.png)](docs/diagrams/task-lifecycle.html)
+
+## Run the project
+
+Requirements: Java 21 or newer. The Maven wrapper downloads Maven 3.9.12 on first use.
+
+```sh
+./mvnw test
+./mvnw spring-boot:run
+```
+
+The API starts on `http://localhost:8080`. The default `local` profile keeps H2 under `./data`, and its development console is available at `http://localhost:8080/h2-console` with JDBC URL `jdbc:h2:file:./data/caseware`, user `sa`, and an empty password. The Docker image also selects this profile so the examples work unchanged.
+
+Health and metrics are exposed through `/actuator/health` and `/actuator/metrics`. Worker settings are under `worker` in `src/main/resources/application.yml`.
+
+On startup, the application loads an idempotent sample dataset into H2: five Engagement Files and the `sample-publication-audit-ca-v7` publication. Three files are eligible for the update, one is already on `v7`, and one belongs to another market. Disable this behavior with `application.sample-data.enabled=false`.
+
+Flyway creates and versions the database schema, while Hibernate only validates the entity mapping. For a managed environment, select the `production` profile and provide `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. That profile disables the H2 console and sample data.
+
+Inspect the sample publication after startup:
+
+```sh
+curl http://localhost:8080/api/v1/template-publications/sample-publication-audit-ca-v7
+```
+
+## Run with Docker
+
+Build the image:
+
+```sh
+docker build -t caseware-template-worker .
+```
+
+Run the container with a named volume so the H2 database survives container replacement:
+
+```sh
+docker volume create caseware-h2-data
+docker run --rm \
+  --name caseware-template-worker \
+  -p 8080:8080 \
+  -v caseware-h2-data:/app/data \
+  caseware-template-worker
+```
+
+The API, H2 console, health endpoint, sample data, and Postman examples use the same URLs documented for local execution.
+
+## Try the flow
+
+Create two lightweight Engagement File catalog entries:
+
+```sh
+curl -X PUT http://localhost:8080/api/v1/engagement-files/file-001 \
+  -H 'Content-Type: application/json' \
+  -d '{"firmId":"firm-1","templateId":"audit-ca","templateVersion":"v5","market":"CA","region":"CANADA"}'
+
+curl -X PUT http://localhost:8080/api/v1/engagement-files/file-002 \
+  -H 'Content-Type: application/json' \
+  -d '{"firmId":"firm-1","templateId":"audit-ca","templateVersion":"v6","market":"CA","region":"CANADA"}'
+```
+
+Publish a new template version:
+
+```sh
+curl -i -X POST http://localhost:8080/api/v1/template-publications \
+  -H 'Content-Type: application/json' \
+  -d '{"publicationId":"pub-audit-ca-v7","templateId":"audit-ca","targetVersion":"v7","market":"CA","publishedAt":"2026-09-28T15:00:00Z"}'
+```
+
+Submitting the exact request again returns `202 Accepted` with `X-Idempotency-Result: DUPLICATE`. Reusing the publication id with a different payload returns `409 Conflict`.
+
+Inspect progress:
+
+```sh
+curl http://localhost:8080/api/v1/template-publications/pub-audit-ca-v7
+```
+
+The bundled downstream adapter logs successful calls immediately. While a call is active, the worker renews its lease with an ownership token. A production adapter would also apply a network timeout and send the provided idempotency key to the owning service.
+
+## Main implementation choices and trade-offs
+
+The code follows ports and adapters (hexagonal architecture):
+
+```text
+domain/                  Framework-independent business types
+application/port/in/     Use cases exposed to inbound adapters
+application/port/out/    Contracts required from infrastructure
+application/service/     Use-case implementations
+adapter/in/web/          REST controllers and request/response models
+adapter/in/scheduler/    Scheduled worker triggers
+adapter/out/persistence/ Spring Data JPA and H2
+adapter/out/downstream/  Downstream service implementation
+config/                  Spring composition root
+```
+
+Dependencies point inward. Controllers and schedulers invoke input ports; application services depend on output ports; JPA entities and repositories remain inside the persistence adapter. The Spring composition root connects concrete adapters to use cases. Lombok generates constructors for dependency injection and the routine accessors and builders required by JPA entities.
+
+`TemplatePublishFanOutService` claims one publication page in a database transaction. It inserts missing tasks and advances the scan cursor atomically. A crash before commit repeats the page safely; a crash after commit resumes from the next cursor.
+
+The persistence layer consists of three Spring Data `JpaRepository` interfaces marked with `@Repository`. JPQL queries select eligible files and acquire pessimistic locks when claiming publications or tasks. Flyway owns schema creation and upgrades; Hibernate validates that the JPA mappings match the migrated schema.
+
+`DownstreamTaskDispatchService` claims durable tasks and submits only as many calls as its semaphore allows. It renews each active lease with an ownership token and distinguishes expected downstream failures from unexpected programming or infrastructure errors. The limit is local to an application instance. In production, instance count multiplied by `worker.max-concurrency` must remain below the downstream team's agreed global capacity; a shared rate limiter or queue concurrency setting should enforce that global contract.
+
+H2 keeps the exercise self-contained and makes persistence behavior testable. It is not the proposed multi-region production database: it cannot provide shared durable state across a horizontally scaled fleet. The production mapping in the architecture document uses one regional durable store and queue per residency boundary while retaining the same ports and idempotency rules.
+
+The implementation tests the API and validation rules, configuration guards, repository behavior, pagination, duplicate and conflicting events, bounded concurrency, lease recovery, retry idempotency, and dead-letter behavior. JaCoCo enforces 100% line coverage and at least 90% branch coverage:
+
+```sh
+./mvnw test
+./mvnw verify
+```
+
+The HTML coverage report is generated at `target/site/jacoco/index.html`.
 
 ## Git Flow
 
-The repository uses Git Flow with two long-lived branches:
+The repository uses `main` for stable releases and `develop` for integration. Create new work from `develop` using `feature/<name>` or `bugfix/<name>`. Create `release/<version>` from `develop`, and create urgent `hotfix/<name>` branches from `main`. Releases and hotfixes merge back into both long-lived branches. Release tags use the `v1.0.0` format.
 
-| Branch | Purpose | Merge target |
-| --- | --- | --- |
-| `main` | Stable, released versions | — |
-| `develop` | Integration branch for ongoing development | `main` through a release |
-| `feature/<name>` | New work, created from `develop` | `develop` |
-| `bugfix/<name>` | Fixes for unreleased work, created from `develop` | `develop` |
-| `release/<version>` | Release preparation, created from `develop` | `main` and `develop` |
-| `hotfix/<name>` | Urgent fixes to a released version, created from `main` | `main` and `develop` |
-
-Temporary branches are created when needed and deleted after their changes have been merged. Use pull requests for integration and preserve merge commits when finishing releases or hotfixes. Published versions use tags such as `v1.0.0`.
-
-### Start a feature
-
-```sh
-git switch develop
-git pull --ff-only origin develop
-git switch -c feature/template-publish-worker
-# Implement and commit the changes.
-git push -u origin feature/template-publish-worker
-```
-
-Open a pull request targeting `develop`.
-
-### Prepare a release
-
-1. Update `develop` and create `release/1.0.0` from it.
-2. Commit only release preparation and stabilization changes on that branch.
-3. Push the branch and open a pull request targeting `main`.
-4. After merging, tag the release merge commit on `main` as `v1.0.0` and push the tag.
-5. Merge the release branch into `develop` through a pull request before deleting it.
-
-### Apply a hotfix
-
-1. Update `main` and create `hotfix/<name>` from it.
-2. Implement, validate, commit, and push the fix.
-3. Open a pull request targeting `main`.
-4. After merging, tag the release merge commit with the next patch version.
-5. Merge the hotfix branch into `develop` through a pull request before deleting it. If a release branch is active, incorporate the fix there too.
-
-### Optional Git Flow extension
-
-Standard Git commands are sufficient. If you use the Git Flow extension, configure each new clone with:
-
-```sh
-git config gitflow.branch.master main
-git config gitflow.branch.develop develop
-git config gitflow.prefix.feature feature/
-git config gitflow.prefix.bugfix bugfix/
-git config gitflow.prefix.release release/
-git config gitflow.prefix.hotfix hotfix/
-git config gitflow.prefix.support support/
-git config gitflow.prefix.versiontag v
-```
-
-These settings are local to each clone. GitHub branch protection is configured separately; the branch structure itself does not enforce pull requests or checks.
+The current implementation branch is `feature/template-publish-worker`.

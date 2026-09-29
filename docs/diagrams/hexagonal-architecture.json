@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ports and Adapters Architecture",
+    "output": "docs/diagrams/hexagonal-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/JohnDuq/caseware.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "ee4b555eb17097fe24c7e196230f3e189ea7a8b4"
+    }
+  },
+  "components": [
+    {
+      "id": "rest",
+      "type": "frontend",
+      "label": "REST Adapters",
+      "sublabel": "publications and files",
+      "pos": [40, 210],
+      "size": [160, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/in/web/TemplatePublicationController.java", "line": 19, "end_line": 44 },
+        { "path": "src/main/java/com/caseware/interview/adapter/in/web/EngagementFileController.java", "line": 17, "end_line": 37 }
+      ]
+    },
+    {
+      "id": "schedulers",
+      "type": "messagebus",
+      "label": "Schedulers",
+      "sublabel": "fan-out and dispatch",
+      "pos": [40, 390],
+      "size": [160, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/in/scheduler/TemplatePublishScheduler.java", "line": 9, "end_line": 21 },
+        { "path": "src/main/java/com/caseware/interview/adapter/in/scheduler/DownstreamTaskScheduler.java", "line": 9, "end_line": 21 }
+      ]
+    },
+    {
+      "id": "input_ports",
+      "type": "backend",
+      "label": "Input Ports",
+      "sublabel": "use case contracts",
+      "pos": [290, 300],
+      "size": [170, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/port/in/TemplatePublicationUseCase.java", "line": 5, "end_line": 10 },
+        { "path": "src/main/java/com/caseware/interview/application/port/in/FanOutUseCase.java", "line": 3, "end_line": 8 },
+        { "path": "src/main/java/com/caseware/interview/application/port/in/TaskDispatchUseCase.java", "line": 3, "end_line": 6 }
+      ]
+    },
+    {
+      "id": "services",
+      "type": "backend",
+      "label": "Application Services",
+      "sublabel": "rules and coordination",
+      "pos": [560, 300],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/service/PublicationApplicationService.java", "line": 17, "end_line": 55 },
+        { "path": "src/main/java/com/caseware/interview/application/service/TemplatePublishFanOutService.java", "line": 19, "end_line": 73 },
+        { "path": "src/main/java/com/caseware/interview/application/service/DownstreamTaskDispatchService.java", "line": 20, "end_line": 81 }
+      ]
+    },
+    {
+      "id": "output_ports",
+      "type": "backend",
+      "label": "Output Ports",
+      "sublabel": "persistence and downstream",
+      "pos": [840, 300],
+      "size": [170, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/port/out/PublicationStorePort.java", "line": 8, "end_line": 27 },
+        { "path": "src/main/java/com/caseware/interview/application/port/out/FanOutTaskStorePort.java", "line": 11, "end_line": 24 },
+        { "path": "src/main/java/com/caseware/interview/application/port/out/EngagementUpdatePort.java", "line": 3, "end_line": 6 }
+      ]
+    },
+    {
+      "id": "jpa",
+      "type": "database",
+      "label": "JPA Adapters",
+      "sublabel": "Spring Data + transactions",
+      "pos": [1090, 180],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaPublicationAdapter.java", "line": 17, "end_line": 72 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaFanOutTaskAdapter.java", "line": 24, "end_line": 98 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/JpaEngagementFileAdapter.java", "line": 13, "end_line": 39 }
+      ]
+    },
+    {
+      "id": "h2",
+      "type": "database",
+      "label": "H2",
+      "sublabel": "publications, catalog, and tasks",
+      "pos": [1360, 180],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/resources/application.yml", "line": 4, "end_line": 15 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/entity/TemplatePublicationJpaEntity.java", "line": 23, "end_line": 67 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/persistence/entity/FanOutTaskJpaEntity.java", "line": 30, "end_line": 76 }
+      ]
+    },
+    {
+      "id": "downstream_adapter",
+      "type": "cloud",
+      "label": "Downstream Adapter",
+      "sublabel": "logging simulation",
+      "pos": [1090, 430],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/adapter/out/downstream/LoggingEngagementUpdateAdapter.java", "line": 8, "end_line": 17 }
+      ]
+    },
+    {
+      "id": "external_service",
+      "type": "external",
+      "label": "Engagement Service",
+      "sublabel": "simulated external contract",
+      "pos": [1400, 430],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/application/port/out/EngagementUpdatePort.java", "line": 3, "end_line": 6 },
+        { "path": "src/main/java/com/caseware/interview/adapter/out/downstream/LoggingEngagementUpdateAdapter.java", "line": 13, "end_line": 16 }
+      ]
+    },
+    {
+      "id": "composition",
+      "type": "cloud",
+      "label": "WorkerConfiguration",
+      "sublabel": "constructor-based composition",
+      "pos": [560, 70],
+      "size": [180, 72],
+      "sources": [
+        { "path": "src/main/java/com/caseware/interview/config/WorkerConfiguration.java", "line": 25, "end_line": 85 }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "rest_input", "from": "rest", "to": "input_ports", "label": "invokes", "variant": "emphasis" },
+    { "id": "scheduler_input", "from": "schedulers", "to": "input_ports", "label": "triggers", "variant": "dashed" },
+    { "id": "input_services", "from": "input_ports", "to": "services", "label": "implemented by" },
+    { "id": "services_output", "from": "services", "to": "output_ports", "label": "depends on" },
+    { "id": "output_jpa", "from": "output_ports", "to": "jpa", "label": "JPA implementation", "fromSide": "right", "toSide": "left" },
+    { "id": "jpa_h2", "from": "jpa", "to": "h2", "label": "reads and writes" },
+    { "id": "output_downstream", "from": "output_ports", "to": "downstream_adapter", "label": "external implementation", "fromSide": "right", "toSide": "left" },
+    { "id": "adapter_external", "from": "downstream_adapter", "to": "external_service", "label": "evaluates update" },
+    { "id": "composition_services", "from": "composition", "to": "services", "label": "wires beans", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Dependency Direction",
+      "items": [
+        "Inbound adapters know only input ports",
+        "Application services depend only on output ports",
+        "Spring and JPA remain outside the domain and application layers"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Composition",
+      "items": [
+        "WorkerConfiguration connects ports to concrete implementations",
+        "Lombok generates the constructors used for dependency injection"
+      ]
+    }
+  ]
+}
